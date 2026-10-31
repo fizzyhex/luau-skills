@@ -31,13 +31,13 @@ terrain generation. No entity needed.
 When the player interacts with it (starts harvesting), NOW create an entity to
 track harvest progress:
 
-```typescript
-// Flower starts as just a mesh in the world (no entity)
-// When interaction begins:
-const flowerEntity = world.entity();
-world.set(flowerEntity, FlowerType, "sunflower");
-world.set(flowerEntity, HarvestProgress, 0);
-world.set(flowerEntity, Transform, clickedPosition);
+```luau
+-- Flower starts as just a mesh in the world (no entity)
+-- When interaction begins:
+local flowerEntity = world:entity()
+world:set(flowerEntity, FlowerType, "sunflower")
+world:set(flowerEntity, HarvestProgress, 0)
+world:set(flowerEntity, Transform, clickedPosition)
 ```
 
 When harvesting completes, delete the entity and remove the mesh.
@@ -74,21 +74,20 @@ Roblox's UI system handles this. Don't create entities for buttons and labels.
 For many similar objects (thousands of NPCs, crops, machines), separate shared
 config from per-instance state:
 
-```typescript
-// Shared config lives in a lookup table (not per-entity)
-const CropConfigs = new Map<
-	CropTypeId,
-	{
-		growthStages: number;
-		growthTimePerStage: number;
-		harvestDrops: Array<ItemDrop>;
-	}
->();
+```luau
+type CropConfig = {
+	growthStages: number,
+	growthTimePerStage: number,
+	harvestDrops: { ItemDrop },
+}
 
-// Per-entity: only instance state
-const CropType = world.component<CropTypeId>();
-const GrowthStage = world.component<number>();
-const LastGrowthTime = world.component<number>();
+-- Shared config lives in a lookup table (not per-entity)
+local CropConfigs: { [CropTypeId]: CropConfig } = {}
+
+-- Per-entity: only instance state
+local CropType = world:component() :: jecs.Id<CropTypeId>
+local GrowthStage = world:component() :: jecs.Id<number>
+local LastGrowthTime = world:component() :: jecs.Id<number>
 ```
 
 Systems look up shared config by type ID. Entities store only what varies

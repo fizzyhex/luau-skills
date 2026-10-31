@@ -2,20 +2,21 @@
 name: ecs-design
 description:
     Use when designing components, systems, or entity structures for jecs in
-    Roblox. Use when deciding if data should be one component or multiple, when
-    archetype transitions seem expensive, or when choosing entity members vs
-    relationships.
+    Roblox Luau. Use when deciding if data should be one component or multiple,
+    when archetype transitions seem expensive, or when choosing entity members
+    vs relationships.
 metadata:
-    author: Christopher Buss
-    version: "2026.1.31"
+    author: Fizzy (fork of Christopher Buss's skills)
+    version: "2026.10.31"
     source:
-        Generated from flecs and ecs-faq, scripts at
-        https://github.com/christopher-buss/skills
+        Generated from flecs and ecs-faq, maintained at
+        https://github.com/fizzyhex/luau-skills
 ---
 
 # ECS Design Principles
 
-Design guidance for jecs in Roblox.
+Design guidance for jecs in Roblox, with examples in strict typed Luau. See the
+`jecs` skill for API details.
 
 ## Core Mental Model
 
@@ -73,7 +74,7 @@ Think of ECS as a **columnar database**:
    data to new archetype; cheap on small entities, expensive on large ones
 3. **Entity members vs relationships** — Use entity members for forward lookup,
    relationships for reverse lookup or grouping
-4. **Cache queries at module scope** — Never call `.cached()` inside a system
+4. **Cache queries at module scope** — Never call `:cached()` inside a system
 5. **Filter in query** — Use with/without, not code conditionals
 6. **Fragmentation can help** — Relationships enable efficient grouped queries
 

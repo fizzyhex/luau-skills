@@ -7,147 +7,162 @@ description: Extending Jest Roblox with custom matchers via expect.extend().
 
 ## Import
 
-```ts
-import { expect } from "@rbxts/jest-globals";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
 ```
 
 ## `expect.extend(matchers)`
 
-Declare the matcher type, then register the implementation:
+Each matcher is a function whose **first parameter is `self`** (the matcher
+context), followed by the received value and the matcher's arguments. Use
+`_` when the context is unused.
 
-```ts
-declare module "@rbxts/jest-globals" {
-	namespace jest {
-		interface Expect {
-			toBeWithinRange(floor: number, ceiling: number): unknown;
+```luau
+expect.extend({
+	toBeWithinRange = function(self, received: number, floor: number, ceiling: number)
+		local pass = received >= floor and received <= ceiling
+		local range = self.utils.printExpected(`{floor} - {ceiling}`)
+		local value = self.utils.printReceived(received)
+		return {
+			pass = pass,
+			message = function()
+				if pass then
+					return `expected {value} not to be within range {range}`
+				end
+				return `expected {value} to be within range {range}`
+			end,
 		}
+	end,
+})
+```
 
-		interface InverseAsymmetricMatchers {
-			toBeWithinRange(floor: number, ceiling: number): unknown;
-		}
+## Type Checking Extended Matchers
 
-		// eslint-disable-next-line ts/no-empty-object-type -- Matches upstream types
-		interface Matchers<R, T = {}> {
-			toBeWithinRange(floor: number, ceiling: number): R;
-		}
-	}
+`JestGlobals.expect` only knows the built-in matchers, so calling a custom
+matcher on it is a type error under `--!strict`. `JestGlobals.expectExtended`
+is the same `expect` typed to accept any extra matcher; use it in files that
+call custom matchers:
+
+```luau
+local expect = JestGlobals.expectExtended
+
+expect(100).toBeWithinRange(90, 110)
+```
+
+For precise types, cast with the exported `ExpectExtended` type:
+
+```luau
+type RangeMatchers = {
+	toBeWithinRange: (floor: number, ceiling: number) -> (),
 }
 
-expect.extend({
-	toBeWithinRange(received: number, floor: number, ceiling: number) {
-		const shouldPass = received >= floor && received <= ceiling;
-		const range = this.utils.printExpected(`${floor} - ${ceiling}`);
-		const value = this.utils.printReceived(received);
-		const message = shouldPass
-			? () => `expected ${value} not to be within range ${range}`
-			: () => `expected ${value} to be within range ${range}`;
-
-		return { message, pass: shouldPass };
-	},
-});
+local expect = JestGlobals.expect :: JestGlobals.ExpectExtended<RangeMatchers>
 ```
 
-## The `this` Context (Lua Deviation)
+## Matcher Context (`self`)
 
-In Luau, the first argument is `self` — the matcher context. In roblox-ts,
-`this` is bound automatically. Omit it from the parameter list:
+| Property            | Description                                       |
+| ------------------- | ------------------------------------------------- |
+| `self.isNot`        | `true` if called through `.never`                 |
+| `self.promise`      | Set when called through `.resolves` / `.rejects`  |
+| `self.equals(a, b)` | Recursive deep-equality check                     |
+| `self.utils`        | Formatting helpers from `jest-matcher-utils`      |
 
-```ts
+The flag is `isNot` even though the user-facing modifier is `.never`.
+
+### Formatting with `self.utils`
+
+`matcherHint`, `printExpected` and `printReceived` produce standard Jest
+output:
+
+```luau
 expect.extend({
-	toBeEven(received: number) {
+	toBeFoo = function(self, received: string)
+		local options = { isNot = self.isNot, promise = self.promise }
+		local pass = received == "foo"
 		return {
-			message: () => `expected ${received} to be even`,
-			pass: received % 2 === 0,
-		};
-	},
-});
-```
-
-## Matcher Context Properties
-
-Available on `this`:
-
-| Property            | Description                                  |
-| ------------------- | -------------------------------------------- |
-| `this.isNever`      | `true` if called with `.never`               |
-| `this.equals(a, b)` | Deep equality check                          |
-| `this.utils`        | Formatting utilities from jest-matcher-utils |
-
-### Formatting with `this.utils`
-
-```ts
-expect.extend({
-	toBeFoo(received: string) {
-		const shouldPass = received === "foo";
-		return {
-			message: () => {
-				return (
-					`${this.utils.matcherHint("toBeFoo")}\n\n` +
-					`Expected: ${this.utils.printExpected("foo")}\n` +
-					`Received: ${this.utils.printReceived(received)}`
-				);
-			},
-			pass: shouldPass,
-		};
-	},
-});
+			pass = pass,
+			message = function()
+				return self.utils.matcherHint("toBeFoo", nil, nil, options)
+					.. "\n\n"
+					.. `Expected: {if pass then "never " else ""}{self.utils.printExpected("foo")}\n`
+					.. `Received: {self.utils.printReceived(received)}`
+			end,
+		}
+	end,
+})
 ```
 
 ## Return Value
 
-Matchers must return `{ pass, message }`:
+Matchers must return `{ pass: boolean, message: () -> string }`:
 
-- `pass` — boolean indicating match
-- `message` — function returning error string
-    - When `pass = true`: message for `.never` failure case
-    - When `pass = false`: message for normal failure case
+- `pass`: whether the value matched
+- `message`: function returning the failure text
+    - When `pass = true`: message for the `.never` failure case
+    - When `pass = false`: message for the normal failure case
 
 ## Using Custom Matchers
 
-```ts
-it("should be in range", () => {
-	expect.assertions(2);
-
-	expect(100).toBeWithinRange(90, 110);
-	expect(101).never.toBeWithinRange(0, 100);
-});
+```luau
+it("is in range", function()
+	expect(100).toBeWithinRange(90, 110)
+	expect(101).never.toBeWithinRange(0, 100)
+end)
 ```
 
 ## As Asymmetric Matchers
 
-Custom matchers work as asymmetric matchers too:
+Custom matchers are also available on `expect` and `expect.never`:
 
-```ts
-expect({ apples: 6, bananas: 3 }).toEqual({
-	apples: expect.toBeWithinRange(1, 10),
-	bananas: expect.never.toBeWithinRange(11, 20),
-});
+```luau
+expect({ apples = 6, bananas = 3 }).toEqual({
+	apples = expect.toBeWithinRange(1, 10),
+	bananas = expect.never.toBeWithinRange(11, 20),
+})
+```
+
+## Custom Snapshot Matchers
+
+Delegate to `JestSnapshot.toMatchSnapshot`, passing `self` through:
+
+```luau
+local JestSnapshot = require(Packages.JestSnapshot)
+local toMatchSnapshot = JestSnapshot.toMatchSnapshot
+
+expect.extend({
+	toMatchTrimmedSnapshot = function(self, received: string, length: number)
+		return toMatchSnapshot(self, string.sub(received, 1, length), "toMatchTrimmedSnapshot")
+	end,
+})
 ```
 
 ## Global Registration
 
-Register in `setupFilesAfterEnv` for all test files:
+Register in a `setupFilesAfterEnv` module so every test file gets the
+matchers:
 
-```ts
-// setupJest.ts
-import { expect } from "@rbxts/jest-globals";
+```luau title="setupJest.luau"
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
 
 expect.extend({
-	toBeWithinRange(received: number, floor: number, ceiling: number) {
-		// ...
-	},
-});
+	toBeWithinRange = function(self, received: number, floor: number, ceiling: number)
+		-- ...
+	end,
+})
 ```
 
-```ts
-// jest.config.ts
-export = {
-	setupFilesAfterEnv: [script.Parent.setupJest],
-};
+```luau title="jest.config.luau"
+return {
+	setupFilesAfterEnv = { script.Parent.setupJest },
+}
 ```
 
 <!--
 Source references:
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/ExpectAPI.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/Deviations.md
+- https://github.com/Roblox/jest-roblox/blob/main/src/jest-globals/src/index.lua
 -->

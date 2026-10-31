@@ -11,44 +11,44 @@ Query, filter, and iterate entities with specific component combinations.
 
 ## Basic Query
 
-```ts
-import Jecs from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
 
-const world = Jecs.world();
+local world = jecs.world()
 
-const Transform = world.component<CFrame>();
-const Velocity = world.component<Vector3>();
+local Transform = world:component() :: jecs.Id<CFrame>
+local Velocity = world:component() :: jecs.Id<Vector3>
 
-// Iterate entities with both components
-for (const [entityId, transform, velocity] of world.query(Transform, Velocity)) {
-	world.set(entityId, Transform, transform.add(velocity));
-}
+-- Iterate entities with both components (values are typed CFrame, Vector3)
+for entityId, transform, velocity in world:query(Transform, Velocity) do
+	world:set(entityId, Transform, transform + velocity)
+end
 ```
 
-Query returns entities that have **all** specified components.
+Query returns entities that have **all** specified components. Queries are
+iterable directly; `query:iter()` returns the same iterator explicitly.
 
 ## Query Filters
 
-Refine queries with `with()` and `without()`.
+Refine queries with `:with()` and `:without()`.
 
-```ts
-// Create tags
-const Walking = world.component();
-const Flying = world.component();
+```luau
+-- Create tags
+local Walking = jecs.tag()
+local Flying = jecs.tag()
 
-// query() returns values - use for components you need to read
-for (const [entityId, transform, velocity] of world.query(Transform, Velocity)) {
-	world.set(entityId, Transform, transform.add(velocity));
-}
+-- query() returns values - use for components you need to read
+for entityId, transform, velocity in world:query(Transform, Velocity) do
+	world:set(entityId, Transform, transform + velocity)
+end
 
-// with() filters only - use for tags or components you don't need to read
-for (const [entityId, transform, velocity] of world
-	.query(Transform, Velocity)
-	.with(Walking)
-	.without(Flying)) {
-	// Walking required but not returned - only transform and velocity available
-	world.set(entityId, Transform, transform.add(velocity));
-}
+-- with() filters only - use for tags or components you don't need to read
+for entityId, transform, velocity in world:query(Transform, Velocity):with(Walking):without(Flying) do
+	-- Walking required but not returned - only transform and velocity available
+	world:set(entityId, Transform, transform + velocity)
+end
 ```
 
 - `query(A, B)`: Returns values of A and B
@@ -60,14 +60,14 @@ for (const [entityId, transform, velocity] of world
 Cache for repeated iteration (systems). Faster iteration, slightly slower
 creation.
 
-```ts
-// Create once, reuse every frame
-const movementQuery = world.query(Transform, Velocity).cached();
+```luau
+-- Create once (module scope), reuse every frame
+local movementQuery = world:query(Transform, Velocity):cached()
 
-// Fast iteration
-for (const [entityId, transform, velocity] of movementQuery) {
-	world.set(entityId, Transform, transform.add(velocity));
-}
+-- Fast iteration
+for entityId, transform, velocity in movementQuery do
+	world:set(entityId, Transform, transform + velocity)
+end
 ```
 
 **When to cache:**
@@ -76,133 +76,86 @@ for (const [entityId, transform, velocity] of movementQuery) {
 - Ad-hoc/one-time queries: **Don't cache**
 - Dynamic runtime conditions: **Don't cache**
 
-### Auto-Caching with Transformer
-
-If
-[rbxts-transformer-jecs](https://github.com/daimond113/rbxts-transformer-jecs)
-is present, queries are automatically cached. Opt out with `/* no-cache */`:
-
-```ts
-// Auto-cached by transformer (no .cached() needed)
-for (const [entityId, transform] of world.query(Transform)) {
-	// ...
-}
-
-// Force uncached for ad-hoc/dynamic queries
-for (const [entityId] of /* no-cache */ world.query(Transform)) {
-	// ...
-}
-```
+A cached query keeps itself up to date as archetypes are created and deleted.
+Call `cachedQuery:fini()` to dispose of one you no longer need.
 
 ## Query Methods
 
-```ts
-const someEntity = world.entity();
+```luau
+local someEntity = world:entity()
 
-const Transform = world.component<CFrame>();
-const Velocity = world.component<Vector3>();
+local query = world:query(Transform, Velocity)
 
-const query = world.query(Transform, Velocity);
+-- Iterate
+for entityId, transform, velocity in query do
+	world:set(entityId, Transform, transform + velocity)
+end
 
-// Iterate
-for (const [entityId, transform, velocity] of query) {
-	world.set(entityId, Transform, transform.add(velocity));
-}
+query:has(someEntity) -- false
 
-query.has(someEntity); // false
+world:set(someEntity, Transform, CFrame.new(0, 0, 0))
+world:set(someEntity, Velocity, Vector3.new(1, 0, 0))
 
-world.set(someEntity, Transform, new CFrame(0, 0, 0));
-world.set(someEntity, Velocity, new Vector3(1, 0, 0));
+-- Check entity membership
+query:has(someEntity) -- true
 
-// Check entity membership
-query.has(someEntity); // true
-
-// Get archetypes directly (advanced)
-const archetypes = query.archetypes();
+-- Get archetypes directly (advanced)
+local archetypes: { jecs.Archetype } = query:archetypes()
 ```
 
 ## Direct Archetype Access
 
-Maximum performance for hot paths - eliminates function call overhead.
-
-```ts
-const cached = world.query(Transform, Velocity).cached();
-
-for (const archetype of cached.archetypes()) {
-	const entities = archetype.entities;
-	const transforms = archetype.columns_map[Transform];
-	const velocities = archetype.columns_map[Velocity];
-
-	for (const [index, entity] of ipairs(entities)) {
-		transforms[index] = transforms[index].add(velocities[index]);
-	}
-}
-```
-
-60-80% faster than iterator for tight loops.
-
-### Automatic with Transformer
-
-[rbxts-transformer-jecs](https://github.com/daimond113/rbxts-transformer-jecs)
-automatically compiles queries to direct archetype access:
-
-```ts
-// You write this
-for (const [id, a, b] of world.query(A, B).with(C)) {
-	print(`${id} has A: ${a} and B: ${b}`);
-}
-```
+Maximum performance for hot paths - eliminates iterator function call
+overhead, which is roughly 60-80% of iteration cost.
 
 ```luau
--- Transformer compiles to this
-local query_1 = world:query(A, B):with(C):cached()
-local archetypes_1 = query_1:archetypes()
-for _, archetype_1 in archetypes_1 do
-	local entities_1 = archetype_1.entities
-	local field_1 = archetype_1.columns_map
-	local A_1 = field_1[A]
-	local B_1 = field_1[B]
-	for row_1 = #entities_1, 1, -1 do
-		local id = entities_1[row_1]
-		local a = A_1[row_1]
-		local b = B_1[row_1]
-		print(`{id} has A: {a} and B: {b}`)
+local cached = world:query(Transform, Velocity):cached()
+
+for _, archetype in cached:archetypes() do
+	local entities = archetype.entities
+	local transforms = archetype.columns_map[Transform]
+	local velocities = archetype.columns_map[Velocity]
+
+	-- Iterate backwards so structural changes to the current row are safe
+	for row = #entities, 1, -1 do
+		transforms[row] = transforms[row] + velocities[row]
 	end
 end
 ```
 
-Write simple query syntax, get maximum performance automatically.
+Columns are untyped (`{ any }`); annotate locals if you want typed access, e.g.
+`local transforms = archetype.columns_map[Transform] :: { CFrame }`.
 
 ## Entity Lookup
 
 Find entities with specific tag/component.
 
-```ts
-// All entities with a component
-for (const entityId of world.each(Transform)) {
-	print(entityId);
-}
+```luau
+-- All entities with a component
+for entityId in world:each(Transform) do
+	print(entityId)
+end
 
-// All children of parent (ChildOf shortcut)
-for (const child of world.children(parent)) {
-	print(child);
-}
+-- All children of parent (ChildOf shortcut)
+for child in world:children(parent) do
+	print(child)
+end
 ```
 
 ## Wildcard Queries
 
 Query relationships with any target.
 
-```ts
-import { pair, Wildcard } from "@rbxts/jecs";
+```luau
+local pair = jecs.pair
 
-const Likes = world.component();
+local Likes = world:entity()
 
-// All entities that like something
-for (const [entityId] of world.query(pair(Likes, Wildcard))) {
-	const target = world.target(entityId, Likes);
-	print(`${entityId} likes ${target}`);
-}
+-- All entities that like something
+for entityId in world:query(pair(Likes, jecs.Wildcard)) do
+	local target = world:target(entityId, Likes)
+	print(`{entityId} likes {target}`)
+end
 ```
 
 See [feature-pairs](feature-pairs.md) for relationship details.
@@ -219,43 +172,37 @@ See [feature-pairs](feature-pairs.md) for relationship details.
 
 **System pattern:**
 
-```ts
-import type { World } from "@rbxts/jecs";
-import Jecs from "@rbxts/jecs";
+```luau
+local Transform = jecs.component() :: jecs.Id<CFrame>
+local Velocity = jecs.component() :: jecs.Id<Vector3>
+local Mass = jecs.component() :: jecs.Id<number>
 
-const Transform = Jecs.component<CFrame>();
-const Velocity = Jecs.component<Vector3>();
-const Mass = Jecs.component<number>();
+local function physicsSystem(world: jecs.World): (deltaTime: number) -> ()
+	-- Runs only once to create the cached query
+	local physicsQuery = world:query(Transform, Velocity, Mass):cached()
 
-function physicsSystem(world: World, deltaTime: number): () => void {
-	// Runs only once to create the cached query
-	const physicsQuery = world.query(Transform, Velocity, Mass).cached();
-
-	return () => {
-		// Run every frame
-		for (const [entity, transform, velocity, mass] of physicsQuery) {
-			// Update physics
-		}
-	};
-}
+	return function(deltaTime: number)
+		-- Runs every frame
+		for entity, transform, velocity, mass in physicsQuery do
+			-- Update physics
+		end
+	end
+end
 ```
 
 **Find first matching entity:**
 
-```ts
-import type { Entity } from "@rbxts/jecs";
+```luau
+local Target = jecs.tag()
+local Active = jecs.tag()
 
-const Target = world.component();
-const Active = world.component();
+local function findFirstTarget(): jecs.Entity?
+	for entity in world:query(Target):with(Active) do
+		return entity
+	end
 
-function findFirstTarget(): Entity | undefined {
-	// eslint-disable-next-line no-unreachable-loop -- Intended to return first match
-	for (const [entity] of world.query(Target).with(Active)) {
-		return entity;
-	}
-
-	return undefined;
-}
+	return nil
+end
 ```
 
 <!--

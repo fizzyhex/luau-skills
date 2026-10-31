@@ -1,20 +1,34 @@
 ---
 name: jecs
 description:
-    Use when building ECS-based games in Roblox with roblox-ts using jecs for
+    Use when building ECS-based games in Roblox with Luau using jecs for
     entities, components, queries, and relationships
 metadata:
-    author: Christopher Buss
-    version: "2026.1.29"
+    author: Fizzy (fork of Christopher Buss's skills)
+    version: "2026.10.31"
     source:
-        Generated from https://github.com/Ukendio/jecs, scripts at
-        https://github.com/christopher-buss/skills
+        Generated from https://github.com/Ukendio/jecs, maintained at
+        https://github.com/fizzyhex/luau-skills
 ---
 
-> Based on jecs v0.9.0, generated 2026-01-29
+> Based on jecs v0.11.0, generated 2026-10-31
 
-High-performance Entity Component System for Luau/roblox-ts. Features entity
+High-performance Entity Component System for Luau. Features entity
 relationships, archetype storage, 800k entities at 60fps.
+
+Examples are strict typed Luau. Unless shown otherwise they assume:
+
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
+
+local world = jecs.world()
+```
+
+Component IDs carry their data type through a cast:
+`local Health = world:component() :: jecs.Id<number>`. World methods use `:`
+(`world:set(...)`); module functions use `.` (`jecs.pair(...)`).
 
 ## Core References
 
@@ -41,6 +55,6 @@ relationships, archetype storage, 800k entities at 60fps.
 
 ## Advanced
 
-| Topic        | Description                                 | Reference                                  |
-| ------------ | ------------------------------------------- | ------------------------------------------ |
-| Advanced API | Preregistration, bulk ops, TypeScript types | [advanced-api](references/advanced-api.md) |
+| Topic        | Description                                  | Reference                                  |
+| ------------ | -------------------------------------------- | ------------------------------------------ |
+| Advanced API | Preregistration, bulk ops, exported types    | [advanced-api](references/advanced-api.md) |

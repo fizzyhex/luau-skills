@@ -2,72 +2,93 @@
 name: Global Mocks
 description: |
     Mocking global Luau functions like print() and math.random() using
-    jest.globalEnv.
+    jest.globalEnv, and spying on game methods with mockDataModel.
 ---
 
 # Global Mocks
 
 ## Import
 
-```ts
-import { expect, it, jest } from "@rbxts/jest-globals";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
+local it = JestGlobals.it
+local jest = JestGlobals.jest
 ```
 
 ## Mocking Global Functions
 
-Use `jest.spyOn()` with `jest.globalEnv` to mock globals like `print()`:
+`jest.globalEnv` is the function environment of the current test. Spy on it
+like any table to mock globals such as `print()`:
 
-```ts
-it("should capture print output", () => {
-	expect.assertions(1);
+```luau
+it("captures print output", function()
+	local mockPrint = jest.spyOn(jest.globalEnv, "print")
+	mockPrint.mockImplementation(function() end)
 
-	const mockPrint = jest.spyOn(jest.globalEnv, "print");
-	mockPrint.mockImplementation(() => {
-		/* no-op */
-	});
+	print("hello")
 
-	print("hello");
-
-	expect(mockPrint).toHaveBeenCalledWith("hello");
-});
+	expect(mockPrint).toHaveBeenCalledWith("hello")
+end)
 ```
+
+This also affects modules required by the test, e.g. a module that calls
+`print` internally.
 
 ## Mocking Library Functions
 
-Index into `jest.globalEnv` to access libraries like `math`:
+Index into `jest.globalEnv` to reach libraries like `math`:
 
-```ts
-it("should mock math.random", () => {
-	expect.assertions(1);
+```luau
+it("mocks math.random", function()
+	local mockRandom = jest.spyOn(jest.globalEnv.math, "random")
+	mockRandom.mockImplementationOnce(function(_min: number?, _max: number?)
+		return 5
+	end)
 
-	const mockRandom = jest.spyOn(jest.globalEnv.math, "random");
-	mockRandom.mockReturnValue(5);
-
-	expect(math.random(1, 6)).toBe(5);
-});
+	expect(math.random(1, 6)).toBe(5)
+end)
 ```
 
 ## Accessing Original Implementations
 
-The original (unmocked) functions are available on `jest.globalEnv`:
+The original (unmocked) functions remain available through `jest.globalEnv`:
 
-```ts
-const mockRandom = jest.spyOn(jest.globalEnv.math, "random");
-mockRandom.mockReturnValue(5);
+```luau
+local mockRandom = jest.spyOn(jest.globalEnv.math, "random")
+mockRandom.mockReturnValue(5)
 
-math.random(); // 5 (mocked)
-jest.globalEnv.math.random(); // actual random number (original)
+local mocked = math.random() -- 5
+local unmocked = jest.globalEnv.math.random() -- real random number
+```
+
+## Instance Methods
+
+With `mockDataModel = true` in `jest.config`, whitelisted instances
+(currently only `game`) can be spied. The first argument to the
+implementation is the instance (`self`):
+
+```luau
+local mockServices = {
+	LogService = {},
+}
+
+local mock = jest.spyOn(game, "GetService")
+mock.mockImplementation(function(_self, service: string)
+	return mockServices[service]
+end)
+
+expect(game:GetService("LogService")).toEqual(mockServices.LogService)
 ```
 
 ## Limitations
 
-Jest Roblox only supports mocking **whitelisted** globals. These are **not**
-supported:
+Only **whitelisted** globals can be mocked. These are **not** supported:
 
-- `game:GetService()` and Instance methods — use
-  `jest.spyOn(game, "GetService")` with `mockDataModel` enabled instead
-- `require()` — use `jest.mock()` instead
-- Task scheduling (`task.delay`, etc.) — use `jest.useFakeTimers()` instead
+- `require()`: use `jest.mock()` instead
+- Task scheduling (`task.delay`, etc.): use `jest.useFakeTimers()` instead
+- `game` and other Instances through `jest.globalEnv`: use
+  `jest.spyOn(game, ...)` with `mockDataModel` instead
 
 Attempting to mock a non-whitelisted global produces an error:
 
@@ -79,4 +100,5 @@ Jest does not yet support mocking the require global.
 Source references:
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/GlobalMocks.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/JestObjectAPI.md
+- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/Configuration.md
 -->

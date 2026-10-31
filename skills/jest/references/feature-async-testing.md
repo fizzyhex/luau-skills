@@ -1,54 +1,100 @@
 ---
 name: Async Testing
 description: |
-    Testing asynchronous code with Promises in Jest Roblox.
+    Testing asynchronous code with Promises and done callbacks in Jest Roblox.
 ---
 
 # Async Testing
 
 ## Import
 
-```ts
-import { expect, it } from "@rbxts/jest-globals";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
+local it = JestGlobals.it
+
+local Promise = require(Packages.Promise) -- roblox/promise
 ```
+
+Luau has no `async`/`await`. Jest Roblox waits for a test when it **returns**
+a Promise or when the test function takes a `done` parameter.
 
 ## Promises
 
-Return a Promise from the test function. Jest Roblox waits for it to
-resolve/reject:
+Return a Promise from the test function. Jest waits for it; a rejection fails
+the test:
 
-```ts
-it("should fetch peanut butter", async () => {
-	expect.assertions(1);
-
-	const data = await fetchData();
-
-	expect(data).toBe("peanut butter");
-});
+```luau
+it("fetches peanut butter", function()
+	return fetchData():andThen(function(data: string)
+		expect(data).toBe("peanut butter")
+	end)
+end)
 ```
 
-Tests can **only** return a `Promise` or `undefined`.
+Tests can **only** return a `Promise` or `nil`. Forgetting the `return`
+lets the test finish before the assertion runs.
 
 ### `.resolves` / `.rejects`
 
-Unwrap Promises inline. **Must return** the assertion:
+Unwrap Promises inline. **Return** the assertion, since it is a Promise too:
 
-```ts
-it("should resolve to lemon", async () => {
-	expect.assertions(1);
+```luau
+it("resolves to lemon", function()
+	return expect(Promise.resolve("lemon")).resolves.toBe("lemon")
+end)
 
-	await expect(Promise.resolve("lemon")).resolves.toBe("lemon");
-});
+it("rejects with octopus", function()
+	return expect(Promise.reject(Error.new("octopus"))).rejects.toThrow("octopus")
+end)
+```
 
-it("should reject with error", async () => {
-	expect.assertions(1);
+## `done` Callbacks
 
-	await expect(Promise.reject(new Error("fail"))).rejects.toThrow("fail");
-});
+For callback-style APIs, declare a **second** parameter (the first is the test
+context, usually `_`). Jest waits until `done()` is called, or fails with a
+timeout:
+
+```luau
+it("the data is peanut butter", function(_, done)
+	fetchData(function(err: string?, data: string?)
+		if err then
+			done(err)
+			return
+		end
+		xpcall(function()
+			expect(data).toBe("peanut butter")
+			done()
+		end, function(assertionError)
+			done(assertionError)
+		end)
+	end)
+end)
+```
+
+Wrap the assertions in `xpcall` and pass the error to `done`, otherwise a
+failing `expect` only surfaces as an opaque timeout. Do not mix `done` with
+returned Promises.
+
+## Assertion Counts
+
+Use `expect.assertions(n)` or `expect.hasAssertions()` to guarantee
+callbacks actually ran:
+
+```luau
+it("calls both callbacks", function()
+	expect.assertions(2)
+	doAsync(function(data)
+		expect(data).toBeTruthy()
+	end, function(data)
+		expect(data).toBeTruthy()
+	end)
+end)
 ```
 
 <!--
 Source references:
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/TestingAsyncCode.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/ExpectAPI.md
+- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/GlobalAPI.md
 -->

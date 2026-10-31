@@ -9,166 +9,207 @@ description: |
 
 ## Import
 
-```ts
-import { expect, jest } from "@rbxts/jest-globals";
-import { afterThis } from "@rbxts/jest-utils";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
+local jest = JestGlobals.jest
 ```
 
 ## Creating Mocks
 
-### `jest.fn()`
+### `jest.fn(implementation?)`
 
-Returns **two values** (Lua deviation):
+Returns **two values** (Luau deviation):
 
-```ts
-const [mock, mockFunc] = jest.fn();
+```luau
+local mock, mockFn = jest.fn()
 ```
 
-- `mock` — callable table, use for assertions
-- `mockFunc` — real function, pass to code requiring `type(x) == "function"`
+- `mock`: callable table, use for assertions and `.mock*` configuration
+- `mockFn`: real function that forwards to `mock`; pass it to code requiring
+  `typeof(x) == "function"`
 
 If the code accepts callable tables, you only need the first:
 
-```ts
-const [mock] = jest.fn();
+```luau
+local mock = jest.fn()
 ```
 
 With an implementation:
 
-```ts
-const [mock] = jest.fn((x) => x * 2);
+```luau
+local double = jest.fn(function(x: number): number
+	return x * 2
+end)
 
-expect(mock(5)).toBe(10);
+expect(double(5)).toBe(10)
 ```
+
+`jest.fn(impl)` is shorthand for `jest.fn().mockImplementation(impl)`. The
+mock object is typed `any`, so configuration methods and `.mock` fields are
+not type-checked; the forwarding function keeps the implementation's
+signature.
 
 ### `jest.spyOn(object, methodName)`
 
-Creates a mock that wraps an existing method. **Calls the original by default**:
+Creates a mock that tracks calls to `object[methodName]`. **Calls the original
+by default**:
 
-```ts
-const video = { play: () => true };
-const spy = jest.spyOn(video, "play");
-afterThis(() => spy.mockRestore()); // restore original after test
+```luau
+local video = {
+	play = function(): boolean
+		return true
+	end,
+}
 
-video.play();
-expect(spy).toHaveBeenCalled();
+it("plays video", function()
+	local spy = jest.spyOn(video, "play")
+
+	expect(video.play()).toBe(true)
+	expect(spy).toHaveBeenCalled()
+
+	spy.mockRestore() -- put the original back
+end)
 ```
 
 Override the implementation:
 
-```ts
-jest.spyOn(video, "play").mockImplementation(() => false);
+```luau
+jest.spyOn(video, "play").mockImplementation(function()
+	return false
+end)
 ```
+
+By default the spied field is replaced with a forwarding **function**; set
+`oldFunctionSpying = true` in config to replace it with the mock table
+instead. The three-argument `spyOn(object, name, accessType)` form is not
+supported. To spy on `game` methods, see
+[feature-global-mocks](feature-global-mocks.md#instance-methods).
+
+Call `jest.restoreAllMocks()` (e.g. in `afterEach`) to restore every spy.
+It only affects mocks created with `jest.spyOn`.
 
 ## The `.mock` Property
 
-Every mock tracks call data:
+Every mock tracks call data (all arrays are 1-indexed):
 
-```ts
-const [mock] = jest.fn();
-mock("a", "b");
-mock("c");
+```luau
+local mock = jest.fn()
+mock("a", "b")
+mock("c")
 
-const { calls } = mock.mock; // [["a", "b"], ["c"]]
-const { results } = mock.mock; // [{ type: "return", value: undefined }, ...]
-const { instances } = mock.mock; // instances created via mock.new()
-const { lastCall } = mock.mock; // ["c"]
+print(mock.mock.calls) -- { { "a", "b" }, { "c" } }
+print(mock.mock.results) -- { { type = "return", value = nil }, ... }
+print(mock.mock.lastCall) -- { "c" }
+print(mock.mock.instances) -- objects created through mock.new()
 ```
+
+`results[i].type` is `"return"`, `"throw"`, or `"incomplete"`.
+`mockClear`/`mockReset` replace the whole `.mock` table, so do not cache it
+in a local.
 
 ## Configuring Return Values
 
-```ts
-const [mock] = jest.fn();
+```luau
+local mock = jest.fn()
 
-// Fixed return value
-mock.mockReturnValue(42);
-mock(); // 42
+-- Fixed return value
+mock.mockReturnValue(42)
+mock() -- 42
 
-// Return specific values in sequence
-mock.mockReturnValueOnce("first").mockReturnValueOnce("second").mockReturnValue("default");
+-- Values in sequence, then the default
+mock.mockReturnValue("default").mockReturnValueOnce("first").mockReturnValueOnce("second")
 
-mock(); // "first"
-mock(); // "second"
-mock(); // "default"
+mock() -- "first"
+mock() -- "second"
+mock() -- "default"
 ```
 
 ## Configuring Implementations
 
-```ts
-// One-time implementation
-const [mock] = jest.fn((x: number) => x + 1);
-mock.mockImplementationOnce(() => 99);
-mock(); // 99
-mock(1); // 2 (back to default)
+```luau
+local mock = jest.fn(function(x: number): number
+	return x + 1
+end).mockImplementationOnce(function()
+	return 99
+end)
+
+mock(1) -- 99 (one-time implementation)
+mock(1) -- 2 (back to the default)
 ```
+
+Favour `mockReturnValue` over `mockImplementation` where possible.
 
 ## Mock Names
 
-Improve error messages:
+Improve failure messages:
 
-```ts
-const mock = jest.fn()[0].mockName("fetchUser");
-expect(mock).toHaveBeenCalledWith("user-1");
-// Error: expect(fetchUser).toHaveBeenCalledWith("user-1")
+```luau
+local fetchUser = jest.fn().mockName("fetchUser")
+expect(fetchUser).toHaveBeenCalledWith("user-1")
+-- expect(fetchUser).toHaveBeenCalledWith(...)
 ```
+
+`mock.getMockName()` returns the name.
 
 ## Resetting Mocks
 
-| Method                 | Clears calls/results | Removes implementation |
-| ---------------------- | -------------------- | ---------------------- |
-| `mock.mockClear()`     | Yes                  | No                     |
-| `mock.mockReset()`     | Yes                  | Yes                    |
-| `jest.clearAllMocks()` | All mocks            | No                     |
-| `jest.resetAllMocks()` | All mocks            | Yes                    |
+| Method                   | Clears calls/results | Removes implementation | Restores original (spies) |
+| ------------------------ | -------------------- | ---------------------- | ------------------------- |
+| `mock.mockClear()`       | Yes                  | No                     | No                        |
+| `mock.mockReset()`       | Yes                  | Yes                    | No                        |
+| `mock.mockRestore()`     | Yes                  | Yes                    | Yes                       |
+| `jest.clearAllMocks()`   | All mocks            | No                     | No                        |
+| `jest.resetAllMocks()`   | All mocks            | Yes                    | No                        |
+| `jest.restoreAllMocks()` | All spies            | Yes                    | Yes                       |
 
-Auto-clear before each test via config:
+Auto-clear or auto-reset before each test via config:
 
-```ts
-// jest.config.ts
-export = { clearMocks: true };
+```luau title="jest.config.luau"
+return {
+	clearMocks = true, -- or resetMocks = true (runCLI option)
+}
 ```
 
 ## Constructor Mocking
 
-Use `mockFn.new()` instead of JS `new mockFn()`:
+Use `mock.new()` instead of JS `new mockFn()`:
 
-```ts
-const [mockClass] = jest.fn<object, []>();
-const instance = new mockClass();
+```luau
+local MockClass = jest.fn()
+local instance = MockClass.new()
 
-expect(mockClass.mock.instances[0]).toBe(instance);
+expect(MockClass).toHaveBeenCalledTimes(1)
 ```
 
 ## `.mockReturnThis()`
 
-Makes the mock return itself on every call (useful for chaining):
+Makes the mock return the mock object itself on every call:
 
-```ts
-const object = {
-	method: jest.fn()[0].mockReturnThis(),
-};
+```luau
+local mock = jest.fn().mockReturnThis()
 
-expect(object.method()).toBe(object);
+expect(mock()).toBe(mock)
 ```
 
 ## Asserting Mock Calls
 
-```ts
-const [mock] = jest.fn<void, [string]>();
-mock("a");
-mock("b");
+```luau
+local mock = jest.fn()
+mock("a")
+mock("b")
 
-expect(mock).toHaveBeenCalledTimes(2);
-expect(mock).toHaveBeenCalledWith("a");
-expect(mock).toHaveBeenLastCalledWith("b");
-expect(mock).toHaveBeenNthCalledWith(1, "a");
+expect(mock).toHaveBeenCalledTimes(2)
+expect(mock).toHaveBeenCalledWith("a")
+expect(mock).toHaveBeenLastCalledWith("b")
+expect(mock).toHaveBeenNthCalledWith(1, "a")
 ```
 
 Or inspect `.mock` directly:
 
-```ts
-expect(mock.mock.calls).toHaveLength(2);
-expect(mock.mock.calls[0][0]).toBe("a");
+```luau
+expect(mock.mock.calls).toHaveLength(2)
+expect(mock.mock.calls[1][1]).toBe("a")
 ```
 
 <!--
@@ -176,5 +217,6 @@ Source references:
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/MockFunctionAPI.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/MockFunctions.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/JestObjectAPI.md
+- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/Configuration.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/Deviations.md
 -->

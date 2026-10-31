@@ -13,44 +13,50 @@ Patterns for detecting added, changed, and removed components.
 
 Store previous values as relationship pairs to detect changes.
 
-```ts
-import Jecs, { pair, Rest } from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
+local pair = jecs.pair
 
-const world = Jecs.world();
-const Position = world.component<Vector3>();
-const Previous = Rest; // Built-in entity for "previous" pattern
+local world = jecs.world()
+local Position = world:component() :: jecs.Id<Vector3>
+local Previous = jecs.Rest -- Built-in entity for "previous" pattern
 
-// Cached queries for each state
-const added = world.query(Position).without(pair(Previous, Position)).cached();
+-- Cached queries for each state
+local added = world:query(Position):without(pair(Previous, Position)):cached()
 
-const changed = world.query(Position, pair(Previous, Position)).cached();
+local changed = world:query(Position, pair(Previous, Position)):cached()
 
-const removed = world.query(pair(Previous, Position)).without(Position).cached();
+local removed = world:query(pair(Previous, Position)):without(Position):cached()
 ```
+
+`jecs.Rest` is a tag, so `pair(Previous, Position)` carries `Position`'s data
+type (`Vector3`).
 
 ## Processing Changes
 
-```ts
-// Process newly added
-for (const [entity, position] of added) {
-	print(`Added ${entity}: ${position}`);
-	world.set(entity, pair(Previous, Position), position);
-}
+```luau
+-- Process newly added
+for entity, position in added do
+	print(`Added {entity}: {position}`)
+	world:set(entity, pair(Previous, Position), position)
+end
 
-// Process changed (compare values)
-for (const [entity, current, previous] of changed) {
-	if (current !== previous) {
-		// or deep compare
-		print(`Changed ${entity}: ${previous} -> ${current}`);
-		world.set(entity, pair(Previous, Position), current);
-	}
-}
+-- Process changed (compare values)
+for entity, current, previous in changed do
+	if current ~= previous then
+		-- or deep compare for tables
+		print(`Changed {entity}: {previous} -> {current}`)
+		world:set(entity, pair(Previous, Position), current)
+	end
+end
 
-// Process removed
-for (const [entity] of removed.iter()) {
-	print(`Removed from ${entity}`);
-	world.remove(entity, pair(Previous, Position));
-}
+-- Process removed
+for entity in removed:iter() do
+	print(`Removed from {entity}`)
+	world:remove(entity, pair(Previous, Position))
+end
 ```
 
 ## Signal-Based Tracking
@@ -58,115 +64,117 @@ for (const [entity] of removed.iter()) {
 Use signals for immediate notification. See
 [feature-signals](./feature-signals.md) for full signal API details.
 
-```ts
-interface ChangeRecord<T> {
-	added: Map<Entity, T>;
-	changed: Map<Entity, T>;
-	removed: Set<Entity>;
+```luau
+type ChangeRecord<T> = {
+	added: { [jecs.Entity]: T },
+	changed: { [jecs.Entity]: T },
+	removed: { [jecs.Entity]: true },
 }
 
-function trackComponent<T>(component: Entity<T>): ChangeRecord<T> {
-	const record = {
-		added: new Map(),
-		changed: new Map(),
-		removed: new Set(),
-	} satisfies ChangeRecord<T>;
-
-	world.added(component, (entity, _, value) => {
-		record.added.set(entity, value);
-	});
-
-	world.changed(component, (entity, _, value) => {
-		record.changed.set(entity, value);
-	});
-
-	world.removed(component, (entity) => {
-		record.removed.add(entity);
-	});
-
-	return record;
-}
-
-// Usage
-const positionChanges = trackComponent(Position);
-
-// After frame, process and clear
-function flushChanges(): void {
-	for (const [entity, value] of positionChanges.added) {
-		// Handle added
+local function trackComponent<T>(component: jecs.Id<T>): ChangeRecord<T>
+	local record: ChangeRecord<T> = {
+		added = {},
+		changed = {},
+		removed = {},
 	}
 
-	positionChanges.added.clear();
-	positionChanges.changed.clear();
-	positionChanges.removed.clear();
-}
+	world:added(component, function(entity, _, value)
+		record.added[entity] = value
+	end)
+
+	world:changed(component, function(entity, _, value)
+		record.changed[entity] = value
+	end)
+
+	world:removed(component, function(entity)
+		record.removed[entity] = true
+	end)
+
+	return record
+end
+
+-- Usage
+local positionChanges = trackComponent(Position)
+
+-- After frame, process and clear
+local function flushChanges()
+	for entity, value in positionChanges.added do
+		-- Handle added
+	end
+
+	table.clear(positionChanges.added)
+	table.clear(positionChanges.changed)
+	table.clear(positionChanges.removed)
+end
 ```
 
 ## Networking Delta Sync
 
 Combine signals with batched sending:
 
-```ts
-const Networked = Jecs.tag();
-const storages = new Map<Entity, Map<Entity, unknown>>();
+```luau
+local Networked = jecs.tag()
+local REMOVED = "jecs.Remove" -- sentinel for removed components
 
-// Setup tracking for all networked components
-for (const component of world.each(Networked)) {
-	const storage = new Map<Entity, unknown>();
-	storages.set(component, storage);
+local storages: { [jecs.Entity]: { [jecs.Entity]: any } } = {}
 
-	world.added(component, (entity, _, value) => {
-		storage.set(entity, value);
-	});
+-- Setup tracking for all networked components
+for component in world:each(Networked) do
+	local storage: { [jecs.Entity]: any } = {}
+	storages[component] = storage
 
-	world.changed(component, (entity, _, value) => {
-		storage.set(entity, value);
-	});
+	world:added(component, function(entity, _, value)
+		storage[entity] = if value == nil then true else value -- tags have no value
+	end)
 
-	world.removed(component, (entity) => {
-		storage.set(entity, "REMOVED");
-	});
-}
+	world:changed(component, function(entity, _, value)
+		storage[entity] = value
+	end)
 
-// Send delta each frame
-function sendDelta(): void {
-	const delta = {} satisfies Record<string, unknown>;
+	world:removed(component, function(entity)
+		storage[entity] = REMOVED
+	end)
+end
 
-	for (const [component, storage] of storages) {
-		if (storage.size() > 0) {
-			delta[tostring(component)] = storage;
-			storage.clear();
-		}
-	}
+-- Send delta each frame
+local function sendDelta()
+	local delta: { [string]: { [jecs.Entity]: any } } = {}
 
-	if (next(delta)[0] !== undefined) {
-		remotes.replication.FireAllClients(delta);
-	}
-}
+	for component, storage in storages do
+		if next(storage) ~= nil then
+			delta[tostring(component)] = table.clone(storage)
+			table.clear(storage)
+		end
+	end
+
+	if next(delta) ~= nil then
+		remotes.replication:FireAllClients(delta)
+	end
+end
 ```
 
 ## Dirty Flag Pattern
 
 Simple boolean tracking:
 
-```ts
-const Dirty = Jecs.tag();
-const Position = world.component<Vector3>();
+```luau
+local Dirty = jecs.tag()
+local Position = world:component() :: jecs.Id<Vector3>
 
-// Mark dirty on change
-world.set(Position, OnChange, (entity) => {
-	world.add(entity, Dirty);
-});
+-- Mark dirty on change
+world:changed(Position, function(entity)
+	world:add(entity, Dirty)
+end)
 
-// Process dirty entities
-const dirtyQuery = world.query(Position).with(Dirty).cached();
+-- Process dirty entities
+local dirtyQuery = world:query(Position):with(Dirty):cached()
 
-function processDirty(): void {
-	for (const [entity, position] of dirtyQuery) {
-		syncToNetwork(entity, position);
-		world.remove(entity, Dirty);
-	}
-}
+local function processDirty()
+	for entity, position in dirtyQuery do
+		syncToNetwork(entity, position)
+		world:remove(entity, Dirty)
+	end
+end
 ```
 
 ## Comparison Methods
@@ -182,7 +190,7 @@ function processDirty(): void {
 
 - **Previous pairs** work well when changes are frequent. The diffing cost is
   spread across batch processing and you get access to old values.
-- **Signals** (`world.changed`) are better when changes are infrequent and
+- **Signals** (`world:changed`) are better when changes are infrequent and
   diffing becomes your bottleneck. They fire immediately on change.
 
 ## Best Practices

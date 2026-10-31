@@ -7,139 +7,143 @@ description: |
 
 # Asymmetric Matchers
 
-Asymmetric matchers can be used inside `toEqual`, `toBeCalledWith`,
-`toMatchObject`, and other deep-comparison matchers as placeholder values.
+Asymmetric matchers can be used inside `toEqual`, `toHaveBeenCalledWith`,
+`toMatchObject`, `toMatchSnapshot` property matchers, and other
+deep-comparison matchers as placeholder values.
 
 ## Import
 
-```ts
-import { expect } from "@rbxts/jest-globals";
+```luau
+local expect = require(Packages.JestGlobals).expect
 ```
 
 ## `expect.anything()`
 
 Matches anything except `nil`:
 
-```ts
-expect(mock).toHaveBeenCalledWith(expect.anything());
+```luau
+local mock = jest.fn()
+mock("a")
+expect(mock).toHaveBeenCalledWith(expect.anything())
 ```
 
 ## `expect.any(typename | prototype)`
 
-Matches by type string or prototype class:
+Matches by `typeof()` name or by prototype class:
 
-```ts
-// Type strings
-expect({ id: 42 }).toStrictEqual({ id: expect.any("number") });
-expect({ name: "foo" }).toStrictEqual({ name: expect.any("string") });
+```luau
+-- Type strings
+expect({ id = 42 }).toEqual({ id = expect.any("number") })
+expect({ name = "foo" }).toEqual({ name = expect.any("string") })
 
-// Prototype class (uses LuauPolyfill instanceof)
-expect(instance).toEqual(expect.any(MyClass));
+-- Prototype class (uses LuauPolyfill instanceof)
+expect(instance).toEqual(expect.any(MyClass))
 ```
 
-Supports Roblox types (`DateTime`), Luau types (`thread`), and LuauPolyfill
-types (`Error`, `Set`, `Symbol`, `RegExp`).
+Supports Roblox types (`"DateTime"`, `"Vector3"`...), Luau types
+(`"thread"`), `RegExp`, and LuauPolyfill types (`Error`, `Set`...).
 
 ## `expect.nothing()`
 
-Matches only `nil`. Use to assert a key is absent in `toMatchObject`:
+Matches only `nil`. Use to assert a key is absent:
 
-```ts
-expect({ foo: "bar" }).toMatchObject({
-	foo: "bar",
-	missing: expect.nothing(),
-});
+```luau
+expect({ foo = "bar" }).toMatchObject({
+	foo = "bar",
+	missing = expect.nothing(),
+})
 ```
 
 ## `expect.callable()`
 
-Matches anything that can be called — functions, callable tables, and callable
-userdata. Prefer over `expect.any("function")`:
+Matches anything that can be called: functions, callable tables (including
+`jest.fn()` mocks) and callable userdata. Prefer it over
+`expect.any("function")`:
 
-```ts
-expect(callback).toStrictEqual(expect.callable());
+```luau
+expect(callback).toEqual(expect.callable())
 ```
 
 ## `expect.arrayContaining(array)`
 
 Matches a received array that contains all elements of the expected array
-(subset check):
+(subset check; extra elements are allowed):
 
-```ts
-expect(["a", "b", "c"]).toStrictEqual(expect.arrayContaining(["a", "c"]));
+```luau
+expect({ "a", "b", "c" }).toEqual(expect.arrayContaining({ "a", "c" }))
 ```
 
 ## `expect.objectContaining(table)`
 
-Matches a received table containing all expected key-value pairs:
+Matches a received table that recursively contains all expected key-value
+pairs:
 
-```ts
-expect({ x: 1, y: 2, z: 3 }).toStrictEqual(expect.objectContaining({ x: 1, y: 2 }));
+```luau
+expect({ x = 1, y = 2, z = 3 }).toEqual(expect.objectContaining({ x = 1, y = 2 }))
 ```
 
 ## `expect.stringContaining(string)`
 
-Matches a string containing the expected substring:
+Matches a string containing the exact expected substring:
 
-```ts
-expect("hello world").toStrictEqual(expect.stringContaining("world"));
+```luau
+expect("hello world").toEqual(expect.stringContaining("world"))
 ```
 
 ## `expect.stringMatching(pattern | regexp)`
 
-Matches a string against a Lua pattern or `RegExp`:
+Matches a string against a Luau string pattern or a `RegExp`:
 
-```ts
-import { RegExp } from "@rbxts/regexp";
+```luau
+local RegExp = require(Packages.RegExp)
 
-expect("abc123").toStrictEqual(expect.stringMatching("%d+"));
-expect("abc123").toStrictEqual(expect.stringMatching(RegExp("\\d+")));
+expect("abc123").toEqual(expect.stringMatching("%d+"))
+expect("abc123").toEqual(expect.stringMatching(RegExp("\\d+")))
 ```
 
 ## Negated Asymmetric Matchers
 
-All asymmetric matchers have `.never` variants:
+The containing/matching matchers have `.never` variants (also available as
+`expect.arrayNotContaining`, `expect.objectNotContaining`,
+`expect.stringNotContaining`, `expect.stringNotMatching`):
 
-```ts
-import { RegExp } from "@rbxts/regexp";
-
-expect(["a", "b"]).toStrictEqual(expect.never.arrayContaining(["c"]));
-expect({ x: 1 }).toStrictEqual(expect.never.objectContaining({ y: 2 }));
-expect("hello").toStrictEqual(expect.never.stringContaining("bye"));
-expect("hello").toStrictEqual(expect.never.stringMatching(RegExp("^bye")));
+```luau
+expect({ "a", "b" }).toEqual(expect.never.arrayContaining({ "c" }))
+expect({ x = 1 }).toEqual(expect.never.objectContaining({ y = 2 }))
+expect("hello").toEqual(expect.never.stringContaining("bye"))
+expect("hello").toEqual(expect.never.stringMatching("^bye"))
 ```
 
 ## `.resolves` and `.rejects`
 
-Unwrap Promises before matching. **Must return** the assertion:
+Unwrap a Promise (`roblox/promise`) before matching. The result is itself a
+Promise, so **return** it from the test:
 
-```ts
-it("should resolve promises", async () => {
-	expect.assertions(1);
+```luau
+local Promise = require(Packages.Promise)
 
-	await expect(Promise.resolve("ok")).resolves.toBe("ok");
-});
+it("resolves to lemon", function()
+	return expect(Promise.resolve("lemon")).resolves.toBe("lemon")
+end)
 
-it("should reject promises", async () => {
-	expect.assertions(1);
-
-	await expect(Promise.reject(new Error("fail"))).rejects.toThrow("fail");
-});
+it("rejects with octopus", function()
+	return expect(Promise.reject(Error.new("octopus"))).rejects.toThrow("octopus")
+end)
 ```
 
 ## Nesting Asymmetric Matchers
 
 Matchers compose freely:
 
-```ts
+```luau
 expect(data).toEqual({
-	users: expect.arrayContaining([
+	users = expect.arrayContaining({
 		expect.objectContaining({
-			name: expect.any("string"),
-			email: expect.stringMatching(RegExp("@")),
+			name = expect.any("string"),
+			email = expect.stringMatching("@"),
 		}),
-	]),
-});
+	}),
+})
 ```
 
 <!--

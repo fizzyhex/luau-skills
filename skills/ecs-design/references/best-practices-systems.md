@@ -12,39 +12,39 @@ description:
 Systems handle **generalizable behavior patterns** that apply across many entity
 types. One-off logic belongs in helper functions.
 
-```typescript
-// GOOD: Reusable system - works for players, NPCs, projectiles, etc.
-function movementSystem(): void {
-	for (const [entityId, transform, velocity] of world.query(Transform, Velocity)) {
-		transform.add(velocity.mul(dt));
-	}
-}
+```luau
+-- GOOD: Reusable system - works for players, NPCs, projectiles, etc.
+local function movementSystem(dt: number)
+	for entityId, transform, velocity in world:query(Transform, Velocity) do
+		world:set(entityId, Transform, transform + velocity * dt)
+	end
+end
 
-// GOOD: Helper function for one-off spawning logic
-function spawnPlayerCharacter(player: Player): Entity {
-	const entityId = world.entity();
-	world.set(entityId, Transform, player.SpawnLocation);
-	world.set(entityId, Model, createCharacterModel());
-	world.add(entityId, pair(OwnedBy, player));
-	return entityId;
-}
+-- GOOD: Helper function for one-off spawning logic
+local function spawnPlayerCharacter(player: Player, ownerEntity: jecs.Entity): jecs.Entity
+	local entityId = world:entity()
+	world:set(entityId, Transform, getSpawnCFrame(player))
+	world:set(entityId, Model, createCharacterModel())
+	world:add(entityId, pair(OwnedBy, ownerEntity))
+	return entityId
+end
 ```
 
-```typescript
-// BAD: God system with mixed concerns
-function physicsSystem(): void {
-	// Applies gravity
-	// Updates positions
-	// Checks collisions
-	// Resolves collisions
-	// 500 lines of mixed concerns
-}
+```luau
+-- BAD: God system with mixed concerns
+local function physicsSystem()
+	-- Applies gravity
+	-- Updates positions
+	-- Checks collisions
+	-- Resolves collisions
+	-- 500 lines of mixed concerns
+end
 
-// BAD: System for one-off behavior that won't be reused
-function spawnPlayerCharacterSystem(): void {
-	// Only ever spawns player characters
-	// Better as a helper function
-}
+-- BAD: System for one-off behavior that won't be reused
+local function spawnPlayerCharacterSystem()
+	-- Only ever spawns player characters
+	-- Better as a helper function
+end
 ```
 
 **When to make a system vs helper function:**
@@ -67,21 +67,21 @@ function spawnPlayerCharacterSystem(): void {
 
 Systems process batches, not individuals:
 
-```typescript
-// BAD: Single-entity thinking
-function applyDamage(entity: Entity, amount: number): void {
-	const health = world.get(entity, Health);
-	world.set(entity, Health, health - amount);
-}
+```luau
+-- BAD: Single-entity thinking
+-- Called individually for each damage event
+local function applyDamage(entity: jecs.Entity, amount: number)
+	local health = assert(world:get(entity, Health))
+	world:set(entity, Health, health - amount)
+end
 
-// GOOD: Batch processing
-function damageSystem(): void {
-	for (const [entityId, health, damage] of world.query(Health, PendingDamage)) {
-		world.set(entityId, Health, health - damage.amount);
-		world.remove(entityId, PendingDamage);
-	}
-}
-// Called individually for each damage event
+-- GOOD: Batch processing
+local function damageSystem()
+	for entityId, health, damage in world:query(Health, PendingDamage) do
+		world:set(entityId, Health, health - damage.amount)
+		world:remove(entityId, PendingDamage)
+	end
+end
 ```
 
 ## Avoid Work
@@ -90,66 +90,68 @@ The fastest code is code that doesn't run:
 
 ### Use query filters
 
-```typescript
-// BAD: Query all, filter in code
-for (const [entityId, transform] of world.query(Transform)) {
-	if (world.has(entityId, CanMove) && !world.has(entityId, Frozen)) {
-		// move
-	}
-}
+```luau
+-- BAD: Query all, filter in code
+for entityId, transform in world:query(Transform) do
+	if world:has(entityId, CanMove) and not world:has(entityId, Frozen) then
+		-- move
+	end
+end
 
-// GOOD: Filter in query
-for (const [entityId, transform] of world.query(Transform).with(CanMove).without(Frozen)) {
-	// move
-}
+-- GOOD: Filter in query
+for entityId, transform in world:query(Transform):with(CanMove):without(Frozen) do
+	-- move
+end
 ```
 
 ### Use change detection
 
 Track changes using a `Previous` pair component:
 
-```typescript
-// BAD: Update every frame even if unchanged
-for (const [entityId, transform, model] of world.query(Transform, Model)) {
-	model.CFrame = transform; // Expensive even if transform didn't change
-}
+```luau
+local Previous = jecs.Rest
 
-// GOOD: Only process changed entities using Previous pair
-for (const [entityId, transform, previousTransform, model] of world.query(
-	Transform,
-	pair(Previous, Transform),
-	Model,
-)) {
-	if (transform !== previousTransform) {
-		model.CFrame = transform;
-		world.set(entityId, pair(Previous, Transform), transform);
-	}
-}
+-- BAD: Update every frame even if unchanged
+for entityId, transform, model in world:query(Transform, Model) do
+	model:PivotTo(transform) -- Expensive even if transform didn't change
+end
 
-// Initialize Previous when entity is added (separate system)
-for (const [entityId, transform] of world.query(Transform).without(pair(Previous, Transform))) {
-	world.set(entityId, pair(Previous, Transform), transform);
-}
+-- GOOD: Only process changed entities using Previous pair
+for entityId, transform, previousTransform, model in world:query(Transform, pair(Previous, Transform), Model) do
+	if transform ~= previousTransform then
+		model:PivotTo(transform)
+		world:set(entityId, pair(Previous, Transform), transform)
+	end
+end
+
+-- Initialize Previous when entity is added (separate system)
+for entityId, transform in world:query(Transform):without(pair(Previous, Transform)) do
+	world:set(entityId, pair(Previous, Transform), transform)
+end
 ```
 
 ### Use spatial partitioning
 
-```typescript
-// BAD: Check every entity pair
-for (const [entityId1, position1] of query1) {
-	for (const [entityId2, position2] of query2) {
-		if (distance(position1, position2) < range) {
-			// O(n²) comparisons
-		}
-	}
-}
+```luau
+-- BAD: Check every entity pair
+for entityId1, position1 in world:query(Position) do
+	for entityId2, position2 in world:query(Position) do
+		if (position1 - position2).Magnitude < range then
+			-- O(n²) comparisons
+		end
+	end
+end
 
-// GOOD: Use world cells or spatial hash
-for (const [entityId1, position1, cell1] of query1) {
-	for (const [entityId2, position2] of query2.with(pair(InCell, cell1.id))) {
-		// Only check entities in same/adjacent cells
-	}
-}
+-- GOOD: Use world cells or spatial hash
+for entityId1, position1 in world:query(Position) do
+	local cell1 = world:target(entityId1, InCell)
+	if not cell1 then
+		continue
+	end
+	for entityId2, position2 in world:query(Position):with(pair(InCell, cell1)) do
+		-- Only check entities in same/adjacent cells
+	end
+end
 ```
 
 ## System Ordering
@@ -177,53 +179,55 @@ Common phase pattern:
 Systems communicate through components, not function calls. Events work best as
 **separate entities** that reference their targets:
 
-```typescript
-// GOOD: Event as separate entity (preferred pattern)
-// Helper function creates event entity
-function dealDamage(source: Entity, target: Entity, amount: number): Entity {
-	const entityId = world.entity();
-	world.set(entityId, Hit, { amount, source, target });
-	return entityId;
-}
+```luau
+-- GOOD: Event as separate entity (preferred pattern)
+-- Helper function creates event entity
+local function dealDamage(source: jecs.Entity, target: jecs.Entity, amount: number): jecs.Entity
+	local entityId = world:entity()
+	world:set(entityId, Hit, { amount = amount, source = source, target = target })
+	return entityId
+end
 
-// CombatSystem creates hit events
-dealDamage(attacker, victim, 50);
+-- CombatSystem creates hit events
+dealDamage(attacker, victim, 50)
 
-// DamageSystem processes all hits (runs later)
-for (const [entityId, hit] of world.query(Hit)) {
-	const health = world.get(hit.target, Health);
-	if (health) {
-		world.set(hit.target, Health, health - hit.amount);
-	}
-}
+-- DamageSystem processes all hits (runs later)
+for entityId, hit in world:query(Hit) do
+	local health = world:get(hit.target, Health)
+	if health then
+		world:set(hit.target, Health, health - hit.amount)
+	end
+end
 
-// Benefits: Other systems can intercept/modify/log hits independently
+-- Benefits: Other systems can intercept/modify/log hits independently
 ```
 
-```typescript
-// OKAY: Event as component on target (simpler but less flexible)
-world.set(target, PendingDamage, { amount: 50, source: attacker });
+```luau
+-- OKAY: Event as component on target (simpler but less flexible)
+world:set(target, PendingDamage, { amount = 50, source = attacker })
 
-// BAD: Direct function call
-damageSystem.applyDamage(target, 50); // Tight coupling
+-- BAD: Direct function call
+DamageSystem.applyDamage(target, 50) -- Tight coupling
 ```
 
 ## Stateless Systems
 
 Systems should not store state. Use components:
 
-```typescript
-// BAD: State in system
-let lastFrameTime = 0;
-function movementSystem(): void {
-	const dt = now - lastFrameTime;
-	lastFrameTime = now;
-	// ...
-}
+```luau
+-- BAD: State in system (upvalue)
+local lastFrameTime = 0
+local function movementSystem()
+	local now = os.clock()
+	local dt = now - lastFrameTime
+	lastFrameTime = now
+	-- ...
+end
 
-// GOOD: State in component/world
-const frameData = world.component<{ dt: number; time: number }>();
-// Set by a timing system, read by others
+-- GOOD: State in component/world (singleton)
+local FrameData = world:component() :: jecs.Id<{ dt: number, time: number }>
+-- Set by a timing system, read by others:
+-- world:set(FrameData, FrameData, { dt = dt, time = now })
 ```
 
 ## No Yielding in Systems
@@ -231,112 +235,118 @@ const frameData = world.component<{ dt: number; time: number }>();
 Systems must never yield. The scheduler runs systems synchronously in sequence -
 yielding blocks all subsequent systems.
 
-```typescript
-// BAD: Yields in system - blocks everything!
-function pathfindingSystem(): void {
-	for (const [entityId, target] of world.query(Target)) {
-		const path = PathfindingService.ComputeAsync(/* ... */); // YIELDS!
-	}
-}
+```luau
+-- BAD: Yields in system - blocks everything!
+local function pathfindingSystem()
+	for entityId, target in world:query(Target) do
+		PathfindingService:CreatePath():ComputeAsync(start, goal) -- YIELDS!
+	end
+end
 
-// GOOD: Spawn thread for async work
-function pathfindingSystem(): void {
-	for (const [entityId, target] of world.query(Target).without(ComputingPath)) {
-		world.add(entityId, ComputingPath);
-		task.spawn(() => {
-			const path = PathfindingService.ComputeAsync(/* ... */);
-			world.set(entityId, Path, path);
-			world.remove(entityId, ComputingPath);
-		});
-	}
-}
+-- GOOD: Spawn thread for async work
+local function pathfindingSystem()
+	for entityId, target in world:query(Target):without(ComputingPath) do
+		world:add(entityId, ComputingPath)
+		task.spawn(function()
+			local path = PathfindingService:CreatePath()
+			path:ComputeAsync(start, goal)
+			if not world:contains(entityId) then
+				return -- entity was deleted while we yielded
+			end
+			world:set(entityId, Path, path)
+			world:remove(entityId, ComputingPath)
+		end)
+	end
+end
 ```
 
-Common yielding APIs to watch for: `task.wait()`, DataStore calls, any function
-marked `async`.
+Common yielding APIs to watch for: `task.wait()`, DataStore calls, and any
+Roblox method ending in `Async`.
 
 ## Iterator Invalidation
 
 Structural changes (adding/removing components, deleting entities) during
 iteration can cause issues. Mark entities for later processing instead:
 
-```typescript
-// WARNING: May invalidate iterator
-for (const [entityId, health] of world.query(Health)) {
-	if (health <= 0) {
-		world.delete(entityId); // Structural change during iteration!
-	}
-}
+```luau
+-- WARNING: May invalidate iterator
+for entityId, health in world:query(Health) do
+	if health <= 0 then
+		world:delete(entityId) -- Structural change during iteration!
+	end
+end
 
-// SAFER: Mark for deletion, process in cleanup system
-for (const [entityId, health] of world.query(Health).without(Destroy)) {
-	if (health <= 0) {
-		world.add(entityId, Destroy);
-	}
-}
+-- SAFER: Mark for deletion, process in cleanup system
+for entityId, health in world:query(Health):without(Destroy) do
+	if health <= 0 then
+		world:add(entityId, Destroy)
+	end
+end
 
-// Cleanup system runs at end of frame
-for (const [entityId] of world.query(Destroy)) {
-	world.delete(entityId);
-}
+-- Cleanup system runs at end of frame
+for entityId in world:query(Destroy) do
+	world:delete(entityId)
+end
 ```
 
 ## Common System Patterns
 
 ### Event processing
 
-```typescript
-// Events as entities with limited lifetime
-const Hit = world.component<{
-	amount: number;
-	source: Entity;
-	target: Entity;
-}>();
-
-// Helper function to create event
-function dealDamage(source: Entity, target: Entity, amount: number): Entity {
-	const entityId = world.entity();
-	world.set(entityId, Hit, { amount, source, target });
-	return entityId;
+```luau
+-- Events as entities with limited lifetime
+type HitData = {
+	amount: number,
+	source: jecs.Entity,
+	target: jecs.Entity,
 }
+local Hit = world:component() :: jecs.Id<HitData>
+local Destroy = jecs.tag()
 
-// Process events in system
-for (const [entityId, hit] of world.query(Hit).without(Destroy)) {
-	const health = world.get(hit.target, Health);
-	if (health) {
-		world.set(hit.target, Health, health - hit.amount);
-	}
+-- Helper function to create event
+local function dealDamage(source: jecs.Entity, target: jecs.Entity, amount: number): jecs.Entity
+	local entityId = world:entity()
+	world:set(entityId, Hit, { amount = amount, source = source, target = target })
+	return entityId
+end
 
-	world.add(entityId, Destroy);
-}
+-- Process events in system
+for entityId, hit in world:query(Hit):without(Destroy) do
+	local health = world:get(hit.target, Health)
+	if health then
+		world:set(hit.target, Health, health - hit.amount)
+	end
 
-// Cleanup system runs at end of frame
-for (const [entityId] of world.query(Destroy)) {
-	world.delete(entityId);
-}
+	world:add(entityId, Destroy)
+end
+
+-- Cleanup system runs at end of frame
+for entityId in world:query(Destroy) do
+	world:delete(entityId)
+end
 ```
 
 ## Query Caching
 
-**Critical rule:** Never call `.cached()` inside a system. Create cached queries
+**Critical rule:** Never call `:cached()` inside a system. Create cached queries
 at module scope.
 
-```typescript
-// WRONG: Creates new cache every frame!
-function movementSystem(dt: number): void {
-	for (const [entityId, transform, velocity] of world.query(Transform, Velocity).cached()) {
-		// New cache created every call
-	}
-}
+```luau
+-- WRONG: Creates new cache every frame!
+local function movementSystem(dt: number)
+	for entityId, transform, velocity in world:query(Transform, Velocity):cached() do
+		-- New cache created every call
+	end
+end
 
-// RIGHT: Cache created once at module load
-const moveQuery = world.query(Transform, Velocity).cached();
+-- RIGHT: Cache created once at module load
+local moveQuery = world:query(Transform, Velocity):cached()
 
-function movementSystem(dt: number): void {
-	for (const [entityId, transform, velocity] of moveQuery) {
-		// Reuses existing cache
-	}
-}
+local function movementSystem(dt: number)
+	for entityId, transform, velocity in moveQuery do
+		-- Reuses existing cache
+	end
+end
 ```
 
 Cached queries track matching archetypes. Creating them inside systems means

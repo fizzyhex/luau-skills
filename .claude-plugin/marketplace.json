@@ -1,24 +1,18 @@
 {
-	"name": "isentinel",
+	"name": "luau-skills",
 	"owner": {
-		"name": "Christopher Buss",
-		"email": "christopher.buss@pm.me"
+		"name": "Fizzy",
+		"url": "https://github.com/fizzyhex"
 	},
 	"metadata": {
-		"description": "Skills and hooks for roblox-ts, ECS, and development workflows",
-		"version": "1.7.0"
+		"description": "Skills and hooks for typed Luau, Roblox, ECS, and development workflows",
+		"version": "2.0.0"
 	},
 	"plugins": [
 		{
-			"name": "sentinel",
+			"name": "sentinel-luau",
 			"source": "./",
-			"description": "General development workflows including eslint_d lint hook",
-			"skills": ["./no-op/"]
-		},
-		{
-			"name": "commitlint-preflight",
-			"source": "./plugins/commitlint-preflight",
-			"description": "Denies gh pr create and gh pr edit when the PR title fails the repository's commitlint config"
+			"description": "StyLua/selene lint hooks and luau-lsp type-check hooks for Luau projects"
 		}
 	]
 }

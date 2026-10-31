@@ -10,148 +10,171 @@ Roblox-only feature for gating performance in CI and capturing perf metrics.
 
 ## Setup
 
-```ts
-import {
-	benchmark,
-	CustomReporters,
-	initializeProfiler,
-	initializeReporter,
-	MetricLogger,
-} from "@rbxts/jest-benchmark";
+Add the package as a dev dependency:
+
+```toml title="wally.toml"
+[dev-dependencies]
+JestBenchmark = "roblox/jest-benchmark@^3.20.0"
 ```
 
-## `benchmark(name, fn, timeout)`
+```luau
+local JestBenchmark = require(Packages.JestBenchmark)
+local benchmark = JestBenchmark.benchmark
+local CustomReporters = JestBenchmark.CustomReporters
+local MetricLogger = JestBenchmark.MetricLogger
+local initializeReporter = JestBenchmark.Reporter.initializeReporter
+local initializeProfiler = JestBenchmark.Profiler.initializeProfiler
+```
 
-Wrapper around `test` with automatic FPS and timing profiling:
+## `benchmark(name, fn, timeout?)`
 
-```ts
-describe("home page benchmarks", () => {
-	benchmark("should show first render performance", (Profiler, reporters) => {
-		expect.assertions(1);
+Wrapper around `test` with automatic FPS and section-time profiling:
 
-		render(React.createElement(MyPage));
-		const element = screen.getByText("Hello").expect();
+```luau
+describe("home page benchmarks", function()
+	benchmark("first render performance", function(Profiler, reporters)
+		render(React.createElement(HomePage))
+		local element = screen.getByText("Continue")
 
-		expect(element).never.toBeNil();
-	});
-});
+		expect(element).toBeDefined()
+	end)
+end)
 ```
 
 Supports `benchmark.only` and `benchmark.skip`.
 
 The callback receives:
 
-- `Profiler` — controls reporter start/stop
-- `reporters` — table of named custom reporters
+- `Profiler`: controls reporter start/stop
+- `reporters`: table of named custom reporters
 
 ## Reporters
 
-A `Reporter` collects values during a benchmark and reduces them.
+A `Reporter` collects values during a benchmark and reduces them with a
+collector function.
 
 ### Creating a Reporter
 
-```ts
-function average(numbers: Array<number>): number {
-	if (numbers.isEmpty()) {
-		return 0;
-	}
+```luau
+local function average(numbers: { number }): number
+	if #numbers == 0 then
+		return 0
+	end
 
-	let sum = 0;
-	for (const value of numbers) {
-		sum += value;
-	}
+	local sum = 0
+	for _, value in numbers do
+		sum += value
+	end
 
-	return sum / numbers.size();
-}
+	return sum / #numbers
+end
 
-const avgReporter = initializeReporter("average", average);
+local averageReporter = initializeReporter("average", average)
 ```
 
 ### Reporter API
 
-```ts
-avgReporter.start("section1");
-avgReporter.report(10);
-avgReporter.report(20);
-avgReporter.stop();
+```luau
+averageReporter.start("section1")
+averageReporter.report(10)
+averageReporter.report(20)
+averageReporter.stop()
 
-const [names, values] = avgReporter.finish();
-// names: ["section1"], values: [15]
+local sectionNames, sectionValues = averageReporter.finish()
+-- sectionNames: { "section1" }, sectionValues: { 15 }
 ```
 
-Sections can be nested:
+Sections can be nested; values are returned in order of completion:
 
-```ts
-avgReporter.start("total");
+```luau
+averageReporter.start("total")
 
-avgReporter.start("part1");
-avgReporter.report(1);
-avgReporter.report(3);
-avgReporter.stop();
+averageReporter.start("part1")
+averageReporter.report(1)
+averageReporter.report(3)
+averageReporter.stop()
 
-avgReporter.start("part2");
-avgReporter.report(5);
-avgReporter.report(7);
-avgReporter.stop();
+averageReporter.start("part2")
+averageReporter.report(5)
+averageReporter.report(7)
+averageReporter.stop()
 
-avgReporter.stop();
+averageReporter.stop()
 
-const [names, values] = avgReporter.finish();
-// names: ["part1", "part2", "total"], values: [2, 6, 4]
+local sectionNames, sectionValues = averageReporter.finish()
+-- sectionNames: { "part1", "part2", "total" }, sectionValues: { 2, 6, 4 }
 ```
+
+Every `start` must be closed with a `stop`. Reduction only happens in
+`finish`, to keep the benchmark itself cheap.
 
 ## Profiler
 
-Controls multiple reporters at once:
+Controls several reporters at once:
 
-```ts
-const profiler = initializeProfiler([avgReporter, timeReporter], (metricName, value) => {
-	print(metricName, value);
-});
+```luau
+local profiler = initializeProfiler({ averageReporter, timeReporter }, function(metricName: string, value: any)
+	print(`{metricName}: {value}`)
+end)
 
-profiler.start("render");
-// ... benchmark code ...
-profiler.stop();
-profiler.finish(); // calls outputFn for each metric
+profiler.start("render")
+-- ... benchmark code ...
+profiler.stop()
+profiler.finish() -- calls the output function for each metric
 ```
+
+An optional third argument to `initializeProfiler` is a prefix added to all
+section names. Calling `stop` without a matching `start` errors.
 
 ## Custom Reporters in Benchmarks
 
-Default reporters: FPS and SectionTime. Add custom ones:
+Default reporters: FPS and SectionTime. Add custom ones; they arrive in the
+`reporters` table:
 
-```ts
-CustomReporters.useCustomReporters({
-	renderCount: initializeReporter("renders", (numbers) => {
-		let sum = 0;
-		for (const value of numbers) {
-			sum += value;
-		}
+```luau
+beforeEach(function()
+	CustomReporters.useCustomReporters({
+		sum = initializeReporter("sum", function(numbers: { number }): number
+			local sum = 0
+			for _, value in numbers do
+				sum += value
+			end
+			return sum
+		end),
+	})
+end)
 
-		return sum;
-	}),
-});
+benchmark("total renders", function(Profiler, reporters)
+	reporters.sum.report(getRenderCount())
+end)
 
-benchmark("render count", (Profiler, reporters) => {
-	reporters.renderCount.report(getRenderCount());
-});
-
-CustomReporters.useDefaultReporters();
+afterEach(function()
+	CustomReporters.useDefaultReporters()
+end)
 ```
 
 ## Custom Metric Logger
 
-Override the default stdout output:
+Override the default stdout output, e.g. from a `setupFilesAfterEnv` module:
 
-```ts
-const results: Array<{ metric: string; value: number }> = [];
+```luau
+local HttpService = game:GetService("HttpService")
 
-MetricLogger.useCustomMetricLogger((metricName, value) => {
-	results.push({ metric: metricName, value });
-});
+local benchmarks: { string } = {}
 
-// After benchmarks, output collected results as JSON
-print(HttpService.JSONEncode(results));
-MetricLogger.useDefaultMetricLogger();
+beforeEach(function()
+	MetricLogger.useCustomMetricLogger(function(metricName: string, value: any)
+		table.insert(benchmarks, HttpService:JSONEncode({
+			metric = metricName,
+			value = value,
+		}))
+	end)
+end)
+
+afterAll(function()
+	print(table.concat(benchmarks, "\n"))
+	MetricLogger.useDefaultMetricLogger()
+end)
 ```
 
 <!--

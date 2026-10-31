@@ -17,7 +17,7 @@ Think of ECS as a columnar database optimized for batch processing.
 | Column           | Component                     | Transform, Velocity, Health             |
 | Row              | Entity                        | Player, Enemy, Bullet                   |
 | Primary Key      | Entity ID                     | Unique entity identifier                |
-| Foreign Key      | Entity reference in component | `target: Entity`                        |
+| Foreign Key      | Entity reference in component | `target: jecs.Entity`                   |
 | Index            | Query cache                   | Cached query for [Transform, Velocity]  |
 | View             | Query with filters            | Query with `with`/`without`             |
 | Stored Procedure | System                        | MovementSystem, DamageSystem            |
@@ -80,46 +80,46 @@ Database normalization principles apply:
 Each component field should be a single value, not a collection that needs
 iteration.
 
-```typescript
-// Violates 1NF: System must iterate nested array
-const Inventory = world.component<{ items: Array<Item> }>();
+```luau
+-- Violates 1NF: System must iterate nested array
+local Inventory = world:component() :: jecs.Id<{ items: { Item } }>
 
-// Better: Items as separate entities with relationship
-world.add(sword, pair(InInventory, player));
-world.add(shield, pair(InInventory, player));
-// Query: world.query(Item).with(pair(InInventory, player))
+-- Better: Items as separate entities with relationship
+world:add(sword, pair(InInventory, player))
+world:add(shield, pair(InInventory, player))
+-- Query: world:query(Item):with(pair(InInventory, player))
 ```
 
 ### Second Normal Form (2NF): No partial dependencies
 
 Every field in a component should depend on the entire component's purpose.
 
-```typescript
-// Violates 2NF: team doesn't change with transform
-interface Character {
-	team: TeamId; // Partial dependency - doesn't relate to spatial data
-	transform: CFrame;
+```luau
+-- Violates 2NF: team doesn't change with transform
+type Character = {
+	team: TeamId, -- Partial dependency - doesn't relate to spatial data
+	transform: CFrame,
 }
 
-// Better: Separate concerns
-const Transform = world.component<CFrame>();
-const Team = world.component<TeamId>();
+-- Better: Separate concerns
+local Transform = world:component() :: jecs.Id<CFrame>
+local Team = world:component() :: jecs.Id<TeamId>
 ```
 
 ### Third Normal Form (3NF): No transitive dependencies
 
 Don't store data that can be derived from other data.
 
-```typescript
-// Violates 3NF: speed is derived from velocity
-interface Movement {
-	speed: number; // = velocity.Magnitude
-	velocity: Vector3;
+```luau
+-- Violates 3NF: speed is derived from velocity
+type Movement = {
+	speed: number, -- = velocity.Magnitude
+	velocity: Vector3,
 }
 
-// Better: Compute when needed
-const Velocity = world.component<Vector3>();
-// speed = velocity.Magnitude in system
+-- Better: Compute when needed
+local Velocity = world:component() :: jecs.Id<Vector3>
+-- speed = velocity.Magnitude in system
 ```
 
 **Why this matters:**
@@ -134,10 +134,10 @@ update `speed`, or you have consistency bugs.
 - Classic example: `LocalTransform` → `GlobalTransform` (every engine caches
   this)
 
-```typescript
-// Acceptable denormalization: world transform hierarchy
-const LocalTransform = world.component<CFrame>();
-const GlobalTransform = world.component<CFrame>(); // Cached, propagated in bulk
+```luau
+-- Acceptable denormalization: world transform hierarchy
+local LocalTransform = world:component() :: jecs.Id<CFrame>
+local GlobalTransform = world:component() :: jecs.Id<CFrame> -- Cached, propagated in bulk
 ```
 
 Use dirty flags or dedicated propagation systems when caching derived data.
@@ -167,15 +167,15 @@ WHERE HAS(ItemData) AND HAS(pair(InInventory, player1))
 
 The ECS equivalent:
 
-```typescript
-// All moving entities
-world.query(Transform, Velocity);
+```luau
+-- All moving entities
+world:query(Transform, Velocity)
 
-// All enemies on red team
-world.query(Health).with(pair(TeamMember, RedTeam)).with(IsEnemy);
+-- All enemies on red team
+world:query(Health):with(pair(TeamMember, RedTeam), IsEnemy)
 
-// All items in player's inventory
-world.query(ItemData).with(pair(InInventory, player1));
+-- All items in player's inventory
+world:query(ItemData):with(pair(InInventory, player1))
 ```
 
 ## Table (Archetype) Design
@@ -191,48 +191,46 @@ overhead, not total archetype count.
 your queries each match only one archetype. Fragmentation is per-query, not
 global.
 
-```typescript
-// 1000 players, each with pair(InCell, cellN) = 1000 archetypes
-// Query for specific cell = 1 archetype matched = zero fragmentation!
-world.query(Transform).with(pair(InCell, cell42));
+```luau
+-- 1000 players, each with pair(InCell, cellN) = 1000 archetypes
+-- Query for specific cell = 1 archetype matched = zero fragmentation!
+world:query(Transform):with(pair(InCell, cell42))
 
-// Query for ALL transforms = 1000 archetypes = high fragmentation
-world.query(Transform).with(pair(InCell, jecs.Wildcard));
+-- Query for ALL transforms = 1000 archetypes = high fragmentation
+world:query(Transform):with(pair(InCell, jecs.Wildcard))
 ```
 
 ### When Fragmentation Helps
 
 Fragmentation from relationships enables efficient grouped queries:
 
-```typescript
-// Spatial partitioning: only render visible cells
-for (const cellId of visibleCells) {
-	for (const [entityId, transform, model] of world
-		.query(Transform, Model)
-		.with(pair(InCell, cellId))) {
-		// Only entities in this cell - fast!
-	}
-}
+```luau
+-- Spatial partitioning: only render visible cells
+for _, cellId in visibleCells do
+	for entityId, transform, model in world:query(Transform, Model):with(pair(InCell, cellId)) do
+		-- Only entities in this cell - fast!
+	end
+end
 
-// Scene graph: only children of this parent
-for (const [entityId, transform] of world.query(Transform).with(pair(ChildOf, parentId))) {
-	// Direct children only
-}
+-- Scene graph: only children of this parent
+for entityId, transform in world:query(Transform):with(pair(jecs.ChildOf, parentId)) do
+	-- Direct children only
+end
 ```
 
 ### When to Avoid Fragmentation
 
 Avoid relationships when you always query broadly:
 
-```typescript
-// BAD: Every entity has unique AttackedBy target
-world.add(entity, pair(AttackedBy, attacker123));
-// Query for "all attacked entities" iterates thousands of archetypes
+```luau
+-- BAD: Every entity has unique AttackedBy target
+world:add(entity, pair(AttackedBy, attacker123))
+-- Query for "all attacked entities" iterates thousands of archetypes
 
-// GOOD: Use entity member instead
-const AttackedBy = world.component<Entity>();
-world.set(entity, AttackedBy, attacker123);
-// Single archetype for all attacked entities
+-- GOOD: Use entity member instead
+local AttackedBy = world:component() :: jecs.Id<jecs.Entity>
+world:set(entity, AttackedBy, attacker123)
+-- Single archetype for all attacked entities
 ```
 
 **Rule of thumb:**
@@ -246,29 +244,29 @@ Unlike SQL, ECS doesn't have explicit JOINs. Related data access patterns:
 
 **Pattern 1: Component reference**
 
-```typescript
-const Parent = world.component<Entity>();
-// Access parent: world.get(parentEntity, Transform)
+```luau
+local Parent = world:component() :: jecs.Id<jecs.Entity>
+-- Access parent: world:get(parentEntity, Transform)
 ```
 
 **Pattern 2: Relationship query**
 
-```typescript
-// Get all children of an entity
-world.query(Transform).with(pair(ChildOf, parentEntity));
+```luau
+-- Get all children of an entity
+world:query(Transform):with(pair(jecs.ChildOf, parentEntity))
 ```
 
 **Pattern 3: Cached children (denormalization)**
 
-```typescript
-// Parent caches children for O(1) access - duplicates ChildOf relationship info
-const Children = world.component<Array<Entity>>();
-// Requires manual sync when children added/removed
+```luau
+-- Parent caches children for O(1) access - duplicates ChildOf relationship info
+local Children = world:component() :: jecs.Id<{ jecs.Entity }>
+-- Requires manual sync when children added/removed
 ```
 
 Choose based on access pattern:
 
-- forward lookup (child→parent) → entity member or `world.target()`
+- forward lookup (child→parent) → entity member or `world:target()`
 - reverse lookup (parent→children) → relationship query or cached array if
   performance-critical.
 

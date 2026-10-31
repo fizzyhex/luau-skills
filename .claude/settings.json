@@ -1,5 +1,5 @@
 {
-	"includeCoAuthoredBy": true,
+	"includeCoAuthoredBy": false,
 	"permissions": {
 		"allow": [
 			"Bash(gh:*)",
@@ -29,7 +29,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node hooks/lint-guard.ts"
+						"command": "lune run hooks/lint-guard.luau"
 					}
 				]
 			}
@@ -40,11 +40,11 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node hooks/lint.ts"
+						"command": "lune run hooks/lint.luau"
 					},
 					{
 						"type": "command",
-						"command": "node hooks/type-check.ts"
+						"command": "lune run hooks/type-check.luau"
 					}
 				]
 			}
@@ -55,11 +55,11 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node hooks/lint-stop.ts"
+						"command": "lune run hooks/lint-stop.luau"
 					},
 					{
 						"type": "command",
-						"command": "node hooks/type-check-stop.ts"
+						"command": "lune run hooks/type-check-stop.luau"
 					}
 				]
 			}
@@ -70,14 +70,11 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node hooks/clear-lint-state.ts"
+						"command": "lune run hooks/clear-lint-state.luau"
 					}
 				]
 			}
 		]
 	},
-	"outputStyle": "XP Programmer",
-	"enabledPlugins": {
-		"plugin-dev@claude-code-plugins": true
-	}
+	"outputStyle": "XP Programmer"
 }

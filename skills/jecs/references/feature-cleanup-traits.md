@@ -26,20 +26,23 @@ deleted.
 
 ## Configuration
 
-Apply traits as pairs on components:
+Apply traits as `(Condition, Action)` pairs on components:
 
-```ts
-import Jecs, { Delete, OnDelete, pair, Remove } from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
+local pair = jecs.pair
 
-const world = Jecs.world();
+local world = jecs.world()
 
-// (OnDelete, Remove) - Default behavior
-const Tag = world.entity();
-world.add(Tag, pair(OnDelete, Remove));
+-- (OnDelete, Remove) - Default behavior
+local Tag = world:entity()
+world:add(Tag, pair(jecs.OnDelete, jecs.Remove))
 
-// (OnDelete, Delete) - Cascade deletion
-const Critical = world.entity();
-world.add(Critical, pair(OnDelete, Delete));
+-- (OnDelete, Delete) - Cascade deletion
+local Critical = world:entity()
+world:add(Critical, pair(jecs.OnDelete, jecs.Delete))
 ```
 
 ## OnDelete Behaviors
@@ -48,31 +51,31 @@ world.add(Critical, pair(OnDelete, Delete));
 
 When component deleted, remove it from all entities.
 
-```ts
-const Buff = world.entity();
-world.add(Buff, pair(OnDelete, Remove));
+```luau
+local Buff = world:entity()
+world:add(Buff, pair(jecs.OnDelete, jecs.Remove))
 
-const entityId = world.entity();
-world.add(entityId, Buff);
+local entityId = world:entity()
+world:add(entityId, Buff)
 
-world.delete(Buff);
-world.has(entityId, Buff); // false (removed)
-world.contains(entityId); // true (still exists)
+world:delete(Buff)
+world:has(entityId, Buff) -- false (removed)
+world:contains(entityId) -- true (still exists)
 ```
 
 ### OnDelete + Delete
 
 When component deleted, delete all entities that have it.
 
-```ts
-const Temporary = world.entity();
-world.add(Temporary, pair(OnDelete, Delete));
+```luau
+local Temporary = world:entity()
+world:add(Temporary, pair(jecs.OnDelete, jecs.Delete))
 
-const entityId = world.entity();
-world.add(entityId, Temporary);
+local entityId = world:entity()
+world:add(entityId, Temporary)
 
-world.delete(Temporary);
-world.contains(entityId); // false (deleted)
+world:delete(Temporary)
+world:contains(entityId) -- false (deleted)
 ```
 
 ## OnDeleteTarget Behaviors
@@ -83,43 +86,43 @@ For relationships - trigger when target entity is deleted.
 
 Remove relationship when target deleted.
 
-```ts
-const OwnedBy = world.component();
-world.add(OwnedBy, pair(OnDeleteTarget, Remove));
+```luau
+local OwnedBy = world:entity()
+world:add(OwnedBy, pair(jecs.OnDeleteTarget, jecs.Remove))
 
-const loot = world.entity();
-const player = world.entity();
-world.add(loot, pair(OwnedBy, player));
+local loot = world:entity()
+local player = world:entity()
+world:add(loot, pair(OwnedBy, player))
 
-world.delete(player);
-world.has(loot, pair(OwnedBy, player)); // false
-world.contains(loot); // true (loot still exists)
+world:delete(player)
+world:has(loot, pair(OwnedBy, player)) -- false
+world:contains(loot) -- true (loot still exists)
 ```
 
 ### OnDeleteTarget + Delete (Hierarchy)
 
 Delete entities when their relationship target is deleted.
 
-```ts
-// ChildOf has this built-in
-const CustomChildOf = world.component();
-world.add(CustomChildOf, pair(OnDeleteTarget, Delete));
+```luau
+-- ChildOf has this built-in
+local CustomChildOf = world:entity()
+world:add(CustomChildOf, pair(jecs.OnDeleteTarget, jecs.Delete))
 
-const parent = world.entity();
-const child = world.entity();
-world.add(child, pair(CustomChildOf, parent));
+local parent = world:entity()
+local child = world:entity()
+world:add(child, pair(CustomChildOf, parent))
 
-world.delete(parent);
-world.contains(child); // false (cascaded)
+world:delete(parent)
+world:contains(child) -- false (cascaded)
 ```
 
-**Note:** `ChildOf` has this trait built-in.
+**Note:** `jecs.ChildOf` has this trait built-in.
 
 ## Built-in Cleanup Traits
 
-| Component | Cleanup Trait              |
-| --------- | -------------------------- |
-| `ChildOf` | `(OnDeleteTarget, Delete)` |
+| Component      | Cleanup Trait              |
+| -------------- | -------------------------- |
+| `jecs.ChildOf` | `(OnDeleteTarget, Delete)` |
 
 `ChildOf` also has the `Exclusive` trait (one parent only) - see
 [feature-pairs](feature-pairs.md#exclusive-relationships).
@@ -128,26 +131,26 @@ world.contains(child); // false (cascaded)
 
 **Faction membership:**
 
-```ts
-const MemberOf = world.component();
-world.add(MemberOf, pair(OnDeleteTarget, Remove));
-// Deleting faction removes membership, keeps entities
+```luau
+local MemberOf = world:entity()
+world:add(MemberOf, pair(jecs.OnDeleteTarget, jecs.Remove))
+-- Deleting faction removes membership, keeps entities
 ```
 
 **Scene hierarchy:**
 
-```ts
-const InScene = world.component();
-world.add(InScene, pair(OnDeleteTarget, Delete));
-// Deleting scene deletes all entities in it
+```luau
+local InScene = world:entity()
+world:add(InScene, pair(jecs.OnDeleteTarget, jecs.Delete))
+-- Deleting scene deletes all entities in it
 ```
 
 **Equipment slots:**
 
-```ts
-const EquippedBy = world.component();
-world.add(EquippedBy, pair(OnDeleteTarget, Remove));
-// Player deletion removes equipment reference, keeps items
+```luau
+local EquippedBy = world:entity()
+world:add(EquippedBy, pair(jecs.OnDeleteTarget, jecs.Remove))
+-- Player deletion removes equipment reference, keeps items
 ```
 
 ## Performance Note

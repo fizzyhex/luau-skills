@@ -1,5 +1,10 @@
 # Skills Generator
 
+This is a **Luau-only** fork of christopher-buss/skills. Every code example,
+skill, hook, and script is typed Luau (`--!strict`), never TypeScript or
+roblox-ts. Code examples use ```luau fences. Tooling runs on Lune
+(`lune run ...`) with StyLua, selene, and luau-lsp from `rokit.toml`.
+
 Generate [Agent Skills](https://agentskills.io/home) from project documentation.
 
 Focus on agents capabilities and practical usage patterns. For user-facing
@@ -8,15 +13,15 @@ agents already know, you can skip those content.
 
 ## Skill Source Types
 
-There are two types of skill sources. The project lists are defined in
-`meta.ts`:
+There are three types of skill sources. The project lists are defined in
+`meta.luau`:
 
 ### Type 1: Generated Skills (`sources/`)
 
 For OSS projects **without existing skills**. We clone the repo as a submodule
 and generate skills from their documentation.
 
-- **Projects:** jecs, pnpm, tsdown, vitepress, vitest
+- **Projects:** ecs-faq, flecs, jecs, jest (jest-roblox), luau (luau-lang/site)
 - **Workflow:** Read docs → Understand → Generate skills
 - **Source:** `sources/{project}/docs/`
 
@@ -29,7 +34,7 @@ a submodule and sync specified skills to ours.
 - **Workflow:** Pull updates → Copy specified skills (with optional renaming)
 - **Source:** `vendor/{project}/skills/{skill-name}/`
 - **Config:** Each vendor specifies which skills to sync and their output names
-  in `meta.ts`
+  in `meta.luau`
 
 ### Type 3: Hand-written Skills
 
@@ -42,7 +47,7 @@ You don't need to do anything about them unless being asked.
 
 ```text
 .
-├── meta.ts                     # Project metadata (repos & URLs)
+├── meta.luau                     # Project metadata (repos & URLs)
 ├── instructions/               # Instructions for generating skills
 │   └── {project}.md            # Instructions for generating skills for {project}
 │
@@ -66,7 +71,7 @@ You don't need to do anything about them unless being asked.
 
 **Important:** For Type 1 (generated), the `skills/{project}/` name must match
 `sources/{project}/`. For Type 2 (synced), the output name is configured in
-`meta.ts` and may differ from the source skill name.
+`meta.luau` and may differ from the source skill name.
 
 ## Workflows
 
@@ -74,19 +79,19 @@ You don't need to do anything about them unless being asked.
 
 #### Adding a New Project
 
-1. **Add entry to `meta.ts`** in the `submodules` object:
+1. **Add entry to `meta.luau`** in the `submodules` object:
 
-    ```ts
-    export const submodules = {
-    	// ... existing entries
-    	"new-project": "https://github.com/org/repo",
-    };
+    ```luau
+    meta.submodules = {
+    	-- ... existing entries
+    	["new-project"] = "https://github.com/org/repo",
+    }
     ```
 
 2. **Run sync script** to clone the submodule:
 
     ```bash
-    nr start init -y
+    lune run scripts/cli init
     ```
 
     This will clone the repository to `sources/{project}/`
@@ -163,11 +168,11 @@ Also record the version of the tool/project when the skills were generated.
 name: { name }
 description: { description }
 metadata:
-    author: Christopher Buss
+    author: Fizzy (fork of Christopher Buss's skills)
     version: "2026.1.1"
     source:
         Generated from {source-url}, scripts located at
-        https://github.com/christopher-buss/skills
+        https://github.com/fizzyhex/luau-skills
 ---
 
 > The skill is based on {project} v{version}, generated at {date}.
@@ -271,4 +276,12 @@ When generating skills (Type 1 only):
 
 ## Supported Projects
 
-See `meta.ts` for the canonical list of projects and their repository URLs.
+See `meta.luau` for the canonical list of projects and their repository URLs.
+
+## Repository Tooling
+
+- `rokit install` installs lune, selene, StyLua, and luau-lsp.
+- `lune run scripts/cli <init|sync|check|cleanup>` manages submodules.
+- `lune run test/run` runs the hook tests.
+- `stylua --check .` and `selene lib hooks scripts test meta.luau` must pass.
+- Commits carry no AI co-author trailers.

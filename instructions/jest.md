@@ -1,0 +1,2 @@
+- Use strict typed Luau for all examples (never TypeScript or roblox-ts).
+- Import globals from `JestGlobals`; matchers use dot calls and `.never`.

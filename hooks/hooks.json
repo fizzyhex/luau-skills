@@ -6,7 +6,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint-guard"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint-guard.luau\""
 					}
 				]
 			}
@@ -17,11 +17,11 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint.luau\""
 					},
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts type-check"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/type-check.luau\""
 					}
 				]
 			}
@@ -32,11 +32,11 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint-stop"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint-stop.luau\""
 					},
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts type-check-stop"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/type-check-stop.luau\""
 					}
 				]
 			}
@@ -47,7 +47,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint-batch"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint-batch.luau\""
 					}
 				]
 			}
@@ -58,7 +58,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint-subagent-stop"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint-subagent-stop.luau\""
 					}
 				]
 			}
@@ -69,7 +69,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts lint-task-completed"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/lint-task-completed.luau\""
 					}
 				]
 			}
@@ -80,7 +80,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node ${CLAUDE_PLUGIN_ROOT}/wrapper.ts clear-lint-state"
+						"command": "lune run \"${CLAUDE_PLUGIN_ROOT}/hooks/clear-lint-state.luau\""
 					}
 				]
 			}

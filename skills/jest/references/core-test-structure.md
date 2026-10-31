@@ -1,112 +1,147 @@
 ---
 name: Test Structure
 description: |
-    Writing and organizing tests with describe, test/it, factory functions,
-    .each, .only, .skip, and .todo.
+    Writing and organizing tests with describe, test/it, hooks, factory
+    functions, .each, .only, .skip, .todo and .failing.
 ---
 
 # Test Structure
 
-## Imports
+## A Test File
 
-All globals must be explicitly imported:
+Test files are ModuleScripts matched by `testMatch` (by default
+`*.spec`/`*.test` files and anything under `__tests__`). They do not return a
+value. All globals must be explicitly required:
 
-```ts
-import { describe, expect, it, jest } from "@rbxts/jest-globals";
+```luau title="src/__tests__/sum.spec.luau"
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Packages = ReplicatedStorage.Packages
+
+local JestGlobals = require(Packages.JestGlobals)
+local describe = JestGlobals.describe
+local it = JestGlobals.it
+local expect = JestGlobals.expect
+
+local sum = require(script.Parent.Parent.sum)
+
+describe("sum", function()
+	it("adds 1 + 2 to equal 3", function()
+		expect(sum(1, 2)).toBe(3)
+	end)
+end)
 ```
+
+`test` and `it` are aliases. `fdescribe`/`fit` alias `.only`, and
+`xdescribe`/`xit`/`xtest` alias `.skip`.
 
 ## `describe` and `test`
 
-```ts
-describe("math operations", () => {
-	it("should add numbers", () => {
-		expect.assertions(1);
+```luau
+describe("math operations", function()
+	it("adds numbers", function()
+		expect(1 + 2).toBe(3)
+	end)
 
-		expect(1 + 2).toBe(3);
-	});
-
-	it("should subtract numbers", () => {
-		expect.assertions(1);
-
-		expect(5 - 3).toBe(2);
-	});
-});
+	it("subtracts numbers", function()
+		expect(5 - 3).toBe(2)
+	end)
+end)
 ```
 
-## Test Setup — Prefer Factory Functions
+## Test Setup: Prefer Factory Functions
 
-Avoid `beforeEach`/`afterEach` hooks. Use factory functions instead.
+Prefer factory functions over shared state mutated in `beforeEach`.
 
 **Why:**
 
-- Each test explicitly shows its setup — no hidden state from hooks
-- Tests stay independent; no shared mutable state between them
-- Easy to customize per-test without conditional hook logic
-- Easier to read top-to-bottom without jumping to hook definitions
+- Each test explicitly shows its setup; no hidden state from hooks
+- Tests stay independent; no shared mutable upvalues between them
+- Easy to customize per test without conditional hook logic
+- Reads top to bottom without jumping to hook definitions
 
-```ts
-function createPlayer(overrides?: Partial<PlayerData>): PlayerData {
+```luau
+type PlayerData = {
+	name: string,
+	health: number,
+	inventory: { string },
+}
+
+local function createPlayer(overrides: { name: string?, health: number? }?): PlayerData
+	local options = overrides or {}
 	return {
-		name: "TestPlayer",
-		health: 100,
-		inventory: [],
-		...overrides,
-	};
-}
+		name = options.name or "TestPlayer",
+		health = options.health or 100,
+		inventory = {},
+	}
+end
 
-describe("player combat", () => {
-	it("should reduce health on damage", () => {
-		expect.assertions(1);
+describe("player combat", function()
+	it("reduces health on damage", function()
+		local player = createPlayer({ health = 50 })
 
-		const player = createPlayer({ health: 50 });
+		expect(applyDamage(player, 10).health).toBe(40)
+	end)
 
-		expect(applyDamage(player, 10).health).toBe(40);
-	});
+	it("does not go below zero", function()
+		local player = createPlayer({ health = 5 })
 
-	it("should not go below zero", () => {
-		expect.assertions(1);
-
-		const player = createPlayer({ health: 5 });
-
-		expect(applyDamage(player, 20).health).toBe(0);
-	});
-});
+		expect(applyDamage(player, 20).health).toBe(0)
+	end)
+end)
 ```
 
-When multiple values need coordinated setup, return them from a single factory:
+When several values need coordinated setup, return them together:
 
-```ts
-function createBattle(): { attacker: PlayerData; defender: PlayerData } {
-	const attacker = createPlayer({ name: "Attacker", health: 100 });
-	const defender = createPlayer({ name: "Defender", health: 80 });
-	return { attacker, defender };
-}
+```luau
+local function createBattle(): (PlayerData, PlayerData)
+	local attacker = createPlayer({ name = "Attacker", health = 100 })
+	local defender = createPlayer({ name = "Defender", health = 80 })
+	return attacker, defender
+end
 
-it("should apply damage to defender", () => {
-	expect.assertions(1);
+it("applies damage to the defender", function()
+	local attacker, defender = createBattle()
 
-	const { attacker, defender } = createBattle();
-
-	expect(resolveCombat(attacker, defender).defender.health).toBeLessThan(80);
-});
+	expect(resolveCombat(attacker, defender).defender.health).toBeLessThan(80)
+end)
 ```
+
+## Hooks
+
+Use hooks for setup that genuinely must happen around every test (restoring
+mocks, resetting timers, cleaning up Instances):
+
+```luau
+local beforeEach = JestGlobals.beforeEach
+local afterEach = JestGlobals.afterEach
+local beforeAll = JestGlobals.beforeAll
+local afterAll = JestGlobals.afterAll
+
+afterEach(function()
+	jest.useRealTimers()
+	jest.restoreAllMocks()
+end)
+```
+
+Hooks declared inside a `describe` apply only to tests in that block. Order:
+all `beforeAll`, then for each test the outer `beforeEach` before the inner
+ones, the test, then the inner `afterEach` before the outer ones, and finally
+`afterAll`. `describe` bodies all run first (collection), before any test.
+Hooks may return a Promise to make Jest wait.
 
 ## `.only` and `.skip`
 
-Focus or skip tests **within a single file**:
+Focus or skip tests **within a single file** (other files still run):
 
-```ts
-it.only("should run this test", () => {
-	expect.assertions(1);
+```luau
+it.only("runs this test", function()
+	expect(true).toBe(true)
+end)
 
-	expect(true).toBeTruthy();
-});
-
-it.skip("should be explicitly skipped", () => {
-	expect.assertions(1);
-
-	expect(true).toBeFalsy();
-});
+it.skip("is explicitly skipped", function()
+	expect(true).toBe(false)
+end)
 ```
 
 Works on `describe` too: `describe.only()`, `describe.skip()`.
@@ -115,80 +150,101 @@ Works on `describe` too: `describe.only()`, `describe.skip()`.
 
 Placeholder for tests you plan to write:
 
-```ts
-it.todo("should handle edge case");
+```luau
+it.todo("handles the edge case")
 ```
 
-Shows in summary output. Must **not** have a callback function.
+Shows in the summary output. Must **not** be given a callback.
 
 ## `.failing`
 
-Mark tests expected to fail (useful for BDD or contributing known-failing
-tests):
+Mark a test expected to fail; it passes if it throws and fails if it does
+not:
 
-```ts
-it.failing("should be a known bug", () => {
-	expect.assertions(1);
-
-	expect(5).toBe(6);
-});
+```luau
+it.failing("is a known bug", function()
+	expect(5).toBe(6)
+end)
 ```
 
 Supports `.only.failing` and `.skip.failing`.
 
-## `.each` — Data-Driven Tests
+## `.each`: Data-Driven Tests
 
 ### Array of arrays (positional args)
 
-```ts
-it.each([
-	[1, 1, 2],
-	[1, 2, 3],
-	[2, 1, 3],
-])("should add(%i, %i) = %i", (a, b, expected) => {
-	expect.assertions(1);
-
-	expect(a + b).toBe(expected);
-});
+```luau
+it.each({
+	{ 1, 1, 2 },
+	{ 1, 2, 3 },
+	{ 2, 1, 3 },
+})("add(%i, %i) = %i", function(a: number, b: number, expected: number)
+	expect(a + b).toBe(expected)
+end)
 ```
 
-### Table of named tables
+A flat array of primitives is wrapped per row: `{ 1, 2, 3 }` becomes
+`{ { 1 }, { 2 }, { 3 } }`.
 
-roblox-ts doesn't support tagged template literals, so we use a string header to
-name fields:
+### Array of keyed tables
 
-```ts
-it.each([
-	{ a: 1, b: 1, expected: 2 },
-	{ a: 1, b: 2, expected: 3 },
-])("should compute $a + $b = $expected", ({ a, b, expected }) => {
-	expect.assertions(1);
+```luau
+type Case = { a: number, b: number, expected: number }
 
-	expect(a + b).toBe(expected);
-});
+it.each({
+	{ a = 1, b = 1, expected = 2 },
+	{ a = 1, b = 2, expected = 3 },
+})("computes $a + $b = $expected", function(case: Case)
+	expect(case.a + case.b).toBe(case.expected)
+end)
 ```
 
-`.each` works on `it`, `it.only`, `it.skip`, `describe`, `describe.only`, and
-`describe.skip`.
+### Heading string
+
+Luau has no tagged templates. Instead, pass the headings separated by `|`,
+then one table per row:
+
+```luau
+it.each("a | b | expected", { 1, 1, 2 }, { 1, 2, 3 }, { 2, 1, 3 })(
+	"returns $expected when $a is added to $b",
+	function(case: Case)
+		expect(case.a + case.b).toBe(case.expected)
+	end
+)
+```
+
+Titles support printf-style placeholders (`%s`, `%i`, `%d`, `%p`...) for
+positional rows and `$key` for keyed rows. `.each` works on `it`/`test`,
+`.only`, `.skip`, `describe`, `describe.only`, and `describe.skip`.
 
 ## Timeout
 
-All test/hook functions accept a final `timeout` parameter (ms):
+Tests and hooks accept a final `timeout` parameter in milliseconds:
 
-```ts
-it("should be a slow operation", () => {
-	expect.assertions(1);
-
-	// long running test
-}, 10000); // 10 second timeout
+```luau
+it("is a slow operation", function()
+	-- long running test
+end, 10000)
 ```
 
-Default timeout is 5000ms. Configure globally via `testTimeout` in
-`jest.config.ts`.
+The default timeout is 5000 ms. Configure globally via `testTimeout` in
+`jest.config.luau` or `runCLI` options.
+
+## Retries
+
+`jest.retryTimes(n, options?)` (Jest Roblox 3.17+) reruns failing tests. Call
+it at the top level of the file or inside a `describe`:
+
+```luau
+jest.retryTimes(3, { logErrorsBeforeRetry = true })
+```
+
+Options: `logErrorsBeforeRetry`, `waitBeforeRetry` (ms), `retryImmediately`.
 
 <!--
 Source references:
+- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/GettingStarted.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/GlobalAPI.md
 - https://github.com/Roblox/jest-roblox/blob/main/docs/docs/SetupAndTeardown.md
-- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/TestFiltering.md
+- https://github.com/Roblox/jest-roblox/blob/main/docs/docs/JestObjectAPI.md
 -->

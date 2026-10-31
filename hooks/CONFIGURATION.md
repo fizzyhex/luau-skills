@@ -1,132 +1,213 @@
-# `@isentinel/hooks` configuration
+# Sentinel hooks configuration
 
-The lint and typecheck hooks read project-local settings from
-`.claude/sentinel.local.md`. Settings live in the file's YAML frontmatter; any
-markdown body is ignored.
+The sentinel hooks lint, format and type-check Luau code as Claude edits it.
+They are strict typed Luau running on [Lune](https://lune-org.github.io/docs),
+and drive three tools from the target project's toolchain:
 
-```yaml
----
-lint: true
-lint-cadence: tiered
-max-lint-errors: 10
----
-```
+| Step       | Tool                  | What it does                                                         |
+| ---------- | --------------------- | -------------------------------------------------------------------- |
+| Format     | StyLua                | Rewrites the edited file in place (the auto-fix).                    |
+| Lint       | selene                | Reports diagnostics; `error`-severity lines are surfaced to Claude.  |
+| Type check | `luau-lsp analyze`    | Type-checks the edited file and every module that requires it.      |
 
-If the file is absent, every setting falls back to its default. Unknown keys are
-ignored.
+## Requirements
+
+- `lune` must be runnable from the project directory, because the hooks are
+  started as `lune run "${CLAUDE_PLUGIN_ROOT}/hooks/<hook>.luau"`. Either add
+  it to the project's `rokit.toml` or install it globally
+  (`rokit add --global lune-org/lune`).
+- `stylua`, `selene` and `luau-lsp` are resolved from the project directory
+  (so Rokit, Aftman or Foreman shims pick up the project's own versions).
+- StyLua only runs when a `stylua.toml` or `.stylua.toml` is found between the
+  edited file's directory and the project root; selene only runs when a
+  `selene.toml` is found the same way. Each tool runs from its config's
+  directory, so selene's std files and `.styluaignore` resolve as usual.
+
+Every step degrades gracefully: a missing tool, a missing config, missing
+Roblox definitions or a failed `require-graph` skips that step (noted in the
+debug log only). The hooks never block the agent because of their own failure;
+an internal error is printed to stderr with exit code 1, which Claude Code
+treats as non-blocking.
 
 ## Settings
 
-| Setting              | Frontmatter key          | Type                                  | Default       | Description                                                                                                              |
-| -------------------- | ------------------------ | ------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `lint`               | `lint`                   | `boolean`                             | `true`        | Master switch for the lint hooks. When `false`, every lint hook (`PostToolUse`, `PostToolBatch`, `Stop`, `SubagentStop`, `TaskCompleted`) exits immediately. |
-| `typecheck`          | `typecheck`              | `boolean`                             | `true`        | Master switch for the typecheck hooks. When `false`, the `PostToolUse` typecheck hook and the `Stop` typecheck hook exit immediately. |
-| `eslint`             | `eslint`                 | `boolean`                             | `true`        | Run ESLint (`eslint_d`) as part of the lint pass. Disable to skip ESLint while keeping other lint plumbing active. |
-| `oxlint`             | `oxlint`                 | `boolean`                             | `false`       | Run Oxlint as part of the lint pass. Combine with `eslint: false` for an Oxlint-only setup. |
-| `runner`             | `runner`                 | `string`                              | `"pnpm exec"` | Command prefix used to invoke `eslint_d`, `oxlint`, `tsgo`, and `madge`. Set to `"npx"`, `"yarn"`, `"bun x"`, etc. to match your package manager. |
-| `debug`              | `debug`                  | `boolean`                             | `false`       | When `true`, the `Stop` lint hook and `Stop` typecheck hook attach internal trace logs to their reasoning output. Useful for diagnosing why a hook surfaced (or did not surface) errors. |
-| `maxLintAttempts`    | `max-lint-attempts`      | `number`                              | `1`           | Per-file ceiling on consecutive lint surfaces before the `PostToolUse` hook injects a "fix loop appears stuck" notice and the typecheck hook injects a CRITICAL "stop editing this file" notice. Counter resets when the file lints clean. |
-| `maxLintErrors`      | `max-lint-errors`        | `number`                              | `10`          | Maximum number of error lines included in a surface. Any overflow is summarized as `+ N more issues — run pnpm lint to see all`. |
-| `lintCadence`        | `lint-cadence`           | `"strict" \| "tiered" \| "stop-only"` | `"strict"`    | Controls when the lint hook surfaces errors. See [Cadence modes](#cadence-modes). |
-| `lintAutoFixOnBatch` | `lint-auto-fix-on-batch` | `boolean`                             | `true`        | Only used when `lintCadence` is `tiered` or `stop-only`. When `true`, the `PostToolBatch` hook runs `eslint --fix` on every file edited in the batch but does not surface results. Disable to skip the silent batch-fix pass. |
-| `cacheBust`          | `cache-bust`             | comma-separated globs                 | `*.config.*, **/tsconfig*.json` | Globs that force a full ESLint cache wipe when their mtime is newer than the cache. User patterns are appended to the defaults; prefix with `!` to exclude. |
-| `typecheckArgs`      | `typecheck-args`         | comma-separated strings               | `[]`          | Extra arguments passed to `tsgo`. When set, replaces the default `-p <tsconfig> --noEmit --pretty false` invocation with `tsgo <args> <tsconfig>`. |
-| `lintGuardAllow`     | `lint-guard-allow`       | comma-separated globs                 | `[]`          | Project-relative globs exempted from the lint guard. See [Lint guard](#lint-guard). |
-
-### Notes on parsing
-
-- All values are read from YAML frontmatter as strings. Booleans use the literal
-  text `true` / `false`. Quotes around values are stripped.
-- `lint`, `eslint`, `typecheck` default to enabled — only the literal string
-  `false` disables them.
-- `oxlint` and `debug` default to disabled — only the literal string `true`
-  enables them.
-- `cache-bust`, `typecheck-args`, and `lint-guard-allow` are comma-separated;
-  whitespace around each entry is trimmed and empty entries are dropped.
-- `lint-guard-allow` patterns are project-relative and `/`-separated, resolved
-  against `CLAUDE_PROJECT_DIR` (falling back to the working directory).
-  Comparison is case-insensitive on Windows.
-- `lint-cadence` falls back to `strict` if the value is not one of the three
-  recognized strings.
-- `max-lint-attempts` and `max-lint-errors` accept any number; non-numeric
-  values fall back to the default (only `max-lint-errors` is guarded against
-  `NaN` — invalid `max-lint-attempts` values resolve to `NaN`, which makes the
-  per-file loop guard never trip).
-
-## Lint guard
-
-A `PreToolUse` hook blocks `Edit` and `Write` on files whose name matches
-`eslint.config.*`, `oxlint.config.*`, `.eslintrc*`, `.oxlintrc.*`, or
-`sentinel.local.md`. The agent is told to report the offending rule instead of
-editing the config. The settings file is protected too, so an agent cannot
-grant itself a carve-out.
-
-`lint-guard-allow` is the only escape hatch. Patterns are globs matched against
-the file's project-relative path, so a monorepo can open one config while the
-rest stay protected:
+Project-local settings live in the YAML frontmatter of
+`.claude/sentinel.local.md` (relative to `CLAUDE_PROJECT_DIR`, falling back to
+the working directory). Any markdown body is ignored.
 
 ```yaml
 ---
-lint-guard-allow: packages/app/eslint.config.ts
+lint-cadence: tiered
+max-lint-errors: 20
 ---
 ```
 
-With that setting, `packages/app/eslint.config.ts` is editable while
-`packages/lib/eslint.config.ts` and the root config remain blocked. Globs work
-too — `tools/**/eslint.config.*` exempts every config under `tools/`. Files
-outside the project directory are never exempt.
+If the file is absent, every setting falls back to its default. Unknown keys
+are ignored.
+
+| Setting              | Frontmatter key          | Type                                  | Default    | Description |
+| -------------------- | ------------------------ | ------------------------------------- | ---------- | ----------- |
+| `lint`               | `lint`                   | `boolean`                             | `true`     | Master switch for the lint hooks. When `false`, every lint hook (`PostToolUse`, `PostToolBatch`, `Stop`, `SubagentStop`, `TaskCompleted`) exits immediately. |
+| `typecheck`          | `typecheck`              | `boolean`                             | `true`     | Master switch for the typecheck hooks (`PostToolUse` and `Stop`). |
+| `stylua`             | `stylua`                 | `boolean`                             | `true`     | Format edited files with StyLua. Formatting failures (usually syntax errors) are surfaced as `error[stylua]` lint issues. |
+| `selene`             | `selene`                 | `boolean`                             | `true`     | Lint edited files with selene. |
+| `debug`              | `debug`                  | `boolean`                             | `false`    | The `Stop` hooks attach a trace to their output; every other hook appends its trace to `.claude/state/debug.log`. |
+| `maxLintAttempts`    | `max-lint-attempts`      | `number`                              | `1`        | Per-file ceiling on consecutive surfaces. At the ceiling the lint hook adds a "fix loop appears stuck" notice and the typecheck hook a CRITICAL "stop editing this file" notice, and the `Stop` hooks stop blocking on that file. The counter resets when the file comes back clean. |
+| `maxLintErrors`      | `max-lint-errors`        | `number`                              | `10`       | Maximum number of lint error lines per surface. Overflow is summarised as `+ N more issues — run selene . to see all`. |
+| `lintCadence`        | `lint-cadence`           | `"strict" \| "tiered" \| "stop-only"` | `"strict"` | When lint errors are surfaced. See [Cadence modes](#cadence-modes). |
+| `lintAutoFixOnBatch` | `lint-auto-fix-on-batch` | `boolean`                             | `true`     | Only used by the `tiered` and `stop-only` cadences. When `true`, `PostToolBatch` silently formats every file edited in the batch with StyLua. |
+| `typecheckArgs`      | `typecheck-args`         | comma-separated strings               | `[]`       | Replaces the automatic `luau-lsp analyze` flags (platform, definitions, sourcemap, base `.luaurc`). The hook runs `luau-lsp analyze <args> <files>`, so include every flag you need. |
+| `lintGuardAllow`     | `lint-guard-allow`       | comma-separated globs                 | `[]`       | Project-relative globs exempted from the lint guard. See [Lint guard](#lint-guard). |
+
+### Notes on parsing
+
+- Values are read as strings; quotes around them are stripped. Booleans use the
+  literal text `true` / `false`. CRLF line endings are accepted.
+- `lint`, `typecheck`, `stylua` and `selene` default to enabled; only the
+  literal `false` disables them. `debug` defaults to disabled; only the literal
+  `true` enables it.
+- `typecheck-args` and `lint-guard-allow` are comma-separated; whitespace
+  around each entry is trimmed and empty entries are dropped.
+- `lint-guard-allow` globs support `*`, `?`, `[...]`, `{a,b}` and `**`, are
+  matched against the `/`-separated project-relative path, and compare
+  case-insensitively on Windows.
+- `lint-cadence` falls back to `strict` for unrecognised values.
+- `max-lint-attempts` and `max-lint-errors` fall back to their defaults for
+  non-numeric values.
+
+## Type checking
+
+`luau-lsp analyze` runs from the project root on the edited file plus its
+transitive dependents. Dependents come from `luau-lsp require-graph`, which
+understands require-by-string, `.luaurc` aliases and (with a sourcemap) Roblox
+`require(script.Parent...)` paths. The graph covers git-visible Luau files
+(tracked and untracked, honouring `.gitignore`, so submodules and installed
+`Packages/` are skipped), or the whole project directory outside git.
+
+Unless `typecheck-args` is set, the hook adds:
+
+- `--platform=roblox` or `--platform=standard`. The platform comes from
+  `luau-lsp.platform.type` in `.vscode/settings.json` when set; otherwise it
+  is `roblox` when the project root has a `sourcemap.json` or any
+  `*.project.json`, and `standard` otherwise.
+- For Roblox projects, `--definitions=<path>`. `luau-lsp analyze` never
+  downloads definitions itself, so the hooks download luau-lsp's published
+  `globalTypes.d.luau` from
+  `https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.d.luau`
+  and cache it at `.claude/state/luau-lsp/globalTypes.d.luau`. `SessionStart`
+  warms the cache; it is refreshed when older than seven days, and a stale copy
+  is used if the refresh fails. With no copy at all the type check is skipped.
+  To pin your own definitions, place a file at that path (it is refreshed once
+  it is a week old) or use `typecheck-args`.
+- `--sourcemap=<root>/sourcemap.json` when that file exists. Keep it current
+  with `rojo sourcemap --watch` or your sync tool.
+- `--base-luaurc=<root>/.luaurc` when that file exists. Nested `.luaurc` files
+  are still picked up by luau-lsp as usual.
+
+Only diagnostics whose kind ends in `Error` (`TypeError`, `SyntaxError`, ...)
+are surfaced. Lint warnings such as `LocalUnused` are left to selene. Up to five
+errors are shown for the edited file and five for other files.
+
+## Lint guard
+
+A `PreToolUse` hook blocks `Edit` and `Write` on files named `selene.toml`,
+`stylua.toml`, `.stylua.toml`, `.styluaignore` or `sentinel.local.md`. Claude is
+told to report the offending rule to the user instead of editing the config.
+The settings file is protected too, so Claude cannot grant itself a carve-out.
+
+`.luaurc` is deliberately not protected: adding aliases is a routine edit.
+
+`lint-guard-allow` is the only escape hatch. Patterns match the file's
+project-relative path, so a monorepo can open one config while the rest stay
+protected:
+
+```yaml
+---
+lint-guard-allow: packages/app/selene.toml
+---
+```
+
+With that setting, `packages/app/selene.toml` is editable while
+`packages/lib/selene.toml` and the root config remain blocked. Globs work too:
+`tools/**/stylua.toml` exempts every StyLua config under `tools/`. Files outside
+the project directory are never exempt.
 
 ## Cadence modes
 
-`lintCadence` controls when lint diagnostics are surfaced to the agent. Pick
-based on how chatty you want the lint feedback to be.
+`lintCadence` controls when lint diagnostics reach Claude.
 
 ### `strict` (default)
 
-- `PostToolUse` runs `eslint --fix` after every `Edit`/`Write` and surfaces any
-  remaining errors immediately.
-- `PostToolBatch`, `SubagentStop`, and `TaskCompleted` are no-ops.
-- `Stop` re-lints all edited files plus their transitive dependents (resolved
-  via `madge`) and surfaces remaining errors.
+- `PostToolUse` formats the edited file with StyLua, lints it with selene and
+  surfaces any remaining errors immediately.
+- `PostToolBatch`, `SubagentStop` and `TaskCompleted` do nothing.
+- `Stop` re-lints the edited files and blocks once if errors remain.
 
-Best for short tasks where per-edit feedback is desirable.
+Best for short tasks where per-edit feedback is useful.
 
 ### `tiered`
 
-- `PostToolUse` records the edited file but does not run lint or surface
-  anything. No per-edit context noise.
-- `PostToolBatch` silently auto-fixes the edited files (controlled by
-  `lintAutoFixOnBatch`).
-- `SubagentStop` and `TaskCompleted` re-lint edited files at semantic
+- `PostToolUse` records the edited file but does not format, lint or surface
+  anything.
+- `PostToolBatch` silently formats the edited files (see `lintAutoFixOnBatch`).
+- `SubagentStop` and `TaskCompleted` re-lint the edited files at these
   checkpoints and surface remaining errors.
-- `Stop` re-lints edited files (no transitive-dependent expansion in this mode)
-  and surfaces remaining errors.
+- `Stop` re-lints the edited files and surfaces remaining errors.
 
-Best for long agent sessions where per-edit lint output bloats context. Errors
-still surface at meaningful boundaries.
+Best for long sessions where per-edit lint output bloats context.
 
 ### `stop-only`
 
-- `PostToolUse` records the edited file but does not run lint.
-- `PostToolBatch` silently auto-fixes if `lintAutoFixOnBatch` is `true`.
-- `SubagentStop` and `TaskCompleted` are no-ops.
-- `Stop` re-lints edited files only, no transitive-dependent expansion.
+- `PostToolUse` records the edited file but does not lint.
+- `PostToolBatch` silently formats if `lintAutoFixOnBatch` is `true`.
+- `SubagentStop` and `TaskCompleted` do nothing.
+- `Stop` re-lints the edited files.
 
-Best when you only want end-of-task feedback and accept that subagents and
-intermediate task completions return without surfacing lint state.
+Best when you only want end-of-task feedback.
+
+### Stop behaviour
+
+The lint `Stop` hook blocks at most once per batch of edits: after a block it
+records the attempt, and the next stop with errors still present lets Claude
+finish with an informational "may be pre-existing" note. The typecheck `Stop`
+hook allows up to three blocks. Both reset their counters once the files are
+clean.
+
+Linting is per file, so unlike type checking the lint `Stop` hook re-checks
+the edited files only, never their dependents.
 
 ### Typecheck cadence
 
-The typecheck hook does not honour `lintCadence`. `PostToolUse` always runs
-`tsgo` on the edited file (when `typecheck` is enabled) and `Stop` always
-re-runs against edited files plus their transitive dependents.
+The typecheck hooks ignore `lintCadence`. `PostToolUse` always type-checks the
+edited file and its dependents (when `typecheck` is enabled), and `Stop`
+re-checks every edited file plus its dependents.
+
+## State
+
+Hooks keep their state in `<project>/.claude/state/`, which should be
+gitignored:
+
+| File                               | Contents                                                        |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `edited-files.json`                | Edited files per `<session_id>:<agent_id or main>` bucket.       |
+| `lint-attempts.json`               | Per-session, per-file surface counters.                          |
+| `stop-attempts.json`               | Lint `Stop` block counters per bucket.                           |
+| `typecheck-stop-attempts.json`     | Typecheck `Stop` block counters per bucket.                      |
+| `sessions/<session_id>`            | Live-session registry (the `claude` process ID).                 |
+| `claude-pid`                       | Cached `claude` process ID.                                      |
+| `luau-lsp/globalTypes.d.luau`      | Cached Roblox type definitions.                                  |
+| `debug.log`                        | Debug traces (only with `debug: true`).                          |
+
+`SessionStart` registers the session and drops state belonging to sessions
+whose `claude` process is gone. If the process cannot be found, the session is
+recorded as `unknown` and kept for seven days.
 
 ## Examples
 
-### Default — no config file needed
+### Default: no config file needed
 
-Strict cadence, ESLint only, typecheck on, fix-on-edit. Equivalent to creating
-`.claude/sentinel.local.md` with no frontmatter, or omitting the file entirely.
+Strict cadence, StyLua and selene on, type checking on. Equivalent to an empty
+frontmatter or no `.claude/sentinel.local.md` at all.
 
 ### Tiered cadence for long sessions
 
@@ -137,33 +218,32 @@ max-lint-errors: 20
 ---
 ```
 
-Lint output stays out of the per-edit context. Errors surface at subagent stops,
-task completions, and the final stop. Up to 20 error lines per surface.
-
-### Oxlint-only, no typecheck
+### Type checking only
 
 ```yaml
 ---
-typecheck: false
-eslint: false
-oxlint: true
+lint: false
 ---
 ```
 
-Skips ESLint and `tsgo`; runs only Oxlint. Pair with `lint-cadence: tiered` if
-you also want to suppress per-edit surfaces.
-
-### Custom runner and extra typecheck args
+### Format with StyLua but skip selene
 
 ```yaml
 ---
-runner: bun x
-typecheck-args: --noEmit, --strict, --pretty, false
+selene: false
 ---
 ```
 
-Uses `bun x` to invoke linters and `tsgo`. The custom `typecheck-args` replaces
-the default `tsgo` invocation, so include every flag you need.
+### Custom luau-lsp flags
+
+```yaml
+---
+typecheck-args: --platform=roblox, --definitions=types/globalTypes.d.luau, --sourcemap=sourcemap.json
+---
+```
+
+The automatic flags are replaced, so list every flag you need. Paths are
+relative to the project root.
 
 ### Debug a misbehaving hook
 
@@ -173,6 +253,5 @@ debug: true
 ---
 ```
 
-Attaches internal trace logs to `Stop` lint and `Stop` typecheck output so you
-can see which files were considered, which surfaced, and what the stop-decision
-returned.
+The `Stop` hooks attach traces of the files they considered and the stop
+decision; other hooks write theirs to `.claude/state/debug.log`.

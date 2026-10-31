@@ -12,11 +12,11 @@ component initializes and cleans up. One hook per type per component, by design.
 
 ## Hook Types
 
-| Hook       | Triggers When                       | Signature                        |
-| ---------- | ----------------------------------- | -------------------------------- |
-| `OnAdd`    | Component added with value          | `(entity, id, data) => void`     |
-| `OnChange` | Existing component value changes    | `(entity, id, data) => void`     |
-| `OnRemove` | Component removed or entity deleted | `(entity, id, deleted?) => void` |
+| Hook       | Triggers When                       | Signature                            |
+| ---------- | ----------------------------------- | ------------------------------------ |
+| `OnAdd`    | Component added with value          | `(entity, id, data) -> ()`           |
+| `OnChange` | Existing component value changes    | `(entity, id, data) -> ()`           |
+| `OnRemove` | Component removed or entity deleted | `(entity, id, delete: boolean?) -> ()` |
 
 ### The `id` Parameter
 
@@ -25,163 +25,174 @@ The `id` parameter is the full component ID that triggered the hook:
 - **Regular components:** Same as the component you registered on
 - **Pairs/relationships:** The full pair (e.g., `pair(ChildOf, parent)`)
 
-For pairs, use `pair_second(world, id)` to extract the target entity. See
+For pairs, use `jecs.pair_second(world, id)` to extract the target entity. See
 [Hooks for Pairs](#hooks-for-pairs) for examples.
 
 ## Setting Up Hooks
 
-```ts
-import { Entity, Id, OnAdd, OnChange, OnRemove } from "@rbxts/jecs";
+Hooks are set as data on the component entity. Define them **before** the
+component is first used, or existing archetypes will not invoke them.
 
-const Transform = world.component<CFrame>();
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
 
-world.set(Transform, OnAdd, (entity: Entity, id: Id<CFrame>, data: CFrame) => {
-	print(`Transform added to ${entity}`);
-});
+local world = jecs.world()
+local Transform = world:component() :: jecs.Id<CFrame>
 
-world.set(Transform, OnChange, (entity: Entity, id: Id<CFrame>, data: CFrame) => {
-	print(`Transform changed on ${entity} to ${data}`);
-});
+world:set(Transform, jecs.OnAdd, function(entity: jecs.Entity, id, data)
+	print(`Transform added to {entity}`)
+end)
 
-world.set(Transform, OnRemove, (entity: Entity, id: Id<CFrame>, deleted?: true) => {
-	if (deleted) {
-		return; // Entity being deleted, skip cleanup
-	}
+world:set(Transform, jecs.OnChange, function(entity: jecs.Entity, id, data)
+	print(`Transform changed on {entity} to {data}`)
+end)
 
-	print(`Transform removed from ${entity}`);
-});
+world:set(Transform, jecs.OnRemove, function(entity: jecs.Entity, id, delete)
+	if delete then
+		return -- Entity being deleted, skip cleanup
+	end
+
+	print(`Transform removed from {entity}`)
+end)
 ```
+
+The hook IDs are typed with a generic callback, so leave `id`/`data`
+unannotated and let the solver infer them.
 
 ## OnAdd
 
 Fires after value is set. Receives the component ID and value.
 
-```ts
-const Health = world.component<number>();
+```luau
+local Health = world:component() :: jecs.Id<number>
 
-world.set(Health, OnAdd, (entity, id, value) => {
-	// Initialize related state
-	print(`${entity} now has ${value} health`);
-});
+world:set(Health, jecs.OnAdd, function(entity, id, value)
+	-- Initialize related state
+	print(`{entity} now has {value} health`)
+end)
 
-// Triggers hook
-world.set(entity, Health, 100);
+-- Triggers hook
+world:set(entity, Health, 100)
 ```
 
 ## OnChange
 
 Fires when existing component value is updated (not on initial add).
 
-```ts
-world.set(Health, OnChange, (entity, id, value) => {
-	print(`Health changed to ${value}`);
-});
+```luau
+world:set(Health, jecs.OnChange, function(entity, id, value)
+	print(`Health changed to {value}`)
+end)
 
-world.set(entity, Health, 100); // OnAdd (not OnChange)
-world.set(entity, Health, 50); // OnChange fires
+world:set(entity, Health, 100) -- OnAdd (not OnChange)
+world:set(entity, Health, 50) -- OnChange fires
 ```
 
-**Prefer `world.changed()` instead.** OnChange doesn't fit the
+**Prefer `world:changed()` instead.** OnChange doesn't fit the
 constructor/destructor model - observing mutations is typically an external
-concern. Signals (`world.changed`) use hooks internally but allow multiple
-listeners and disconnect. Using OnChange directly blocks signals from working on
-that component.
+concern. Signals (`world:changed`) are built on the same hook slot but allow
+multiple listeners and disconnect. A hook set *before* the first signal
+subscription is kept as one of the listeners; setting the hook *after*
+subscribing replaces the signal dispatcher and silently breaks the signals.
 
 ## OnRemove
 
-Fires when component is removed OR entity is deleted.
+Fires when component is removed OR entity is deleted. It runs before the value
+is removed, so `world:get(entity, Component)` still works inside it.
 
-```ts
-const Dead = world.component();
+```luau
+local Dead = jecs.tag()
 
-world.set(Health, OnRemove, (entity, id, deleted) => {
-	if (deleted) {
-		// Entity is being deleted - minimal cleanup only
-		return;
-	}
+world:set(Health, jecs.OnRemove, function(entity, id, delete)
+	if delete then
+		-- Entity is being deleted - minimal cleanup only
+		return
+	end
 
-	// Normal removal - full cleanup
-	world.remove(entity, Dead);
-});
+	-- Normal removal - full cleanup
+	world:remove(entity, Dead)
+end)
 ```
 
-i **The `deleted` flag:**
+**The `delete` flag:**
 
 - `true`: Entity being deleted (all components removed)
-- `undefined`: Single component removed normally
+- `nil`: Single component removed normally
 
 ## Structural Changes in Hooks
 
-You CAN call `world.add`, `world.remove`, `world.set` in hooks with caveats:
+You CAN call `world:add`, `world:remove`, `world:set` in hooks with caveats:
 
-```ts
-world.set(Health, OnRemove, (entity, id, deleted) => {
-	if (deleted) {
-		return; // IMPORTANT: Skip during deletion
-	}
+```luau
+world:set(Health, jecs.OnRemove, function(entity, id, delete)
+	if delete then
+		return -- IMPORTANT: Skip during deletion
+	end
 
-	// Safe to make changes
-	world.remove(entity, HealthBar);
-});
+	-- Safe to make changes
+	world:remove(entity, HealthBar)
+end)
 ```
 
-**DEBUG mode** (`Jecs.world(true)`) throws error if you make structural changes
-when `deleted` is true.
+**DEBUG mode** (`jecs.world(true)`) throws an error if you make structural
+changes when `delete` is true.
 
 ## Hook Order with ChildOf
 
 When parent deleted, children's OnRemove hooks fire first (if no cycles).
 
-```ts
-import { ChildOf, pair } from "@rbxts/jecs";
+```luau
+-- Setup hierarchy
+world:add(child, jecs.pair(jecs.ChildOf, parent))
 
-// Setup hierarchy
-world.add(child, pair(ChildOf, parent));
-
-// When parent deleted:
-// 1. Child's OnRemove hooks fire
-// 2. Parent's OnRemove hooks fire
-world.delete(parent);
+-- When parent deleted:
+-- 1. Child's OnRemove hooks fire
+-- 2. Parent's OnRemove hooks fire
+world:delete(parent)
 ```
 
 ## Hooks for Pairs
 
 Hooks on relationship receive the full pair ID.
 
-```ts
-import { pair_second } from "@rbxts/jecs";
+```luau
+local OwnedBy = world:entity()
 
-world.set(ChildOf, OnAdd, (entity, id, _) => {
-	const parentEntity = pair_second(world, id);
-	print(`${entity} now child of ${parentEntity}`);
-});
+world:set(OwnedBy, jecs.OnAdd, function(entity, id, _)
+	local owner = jecs.pair_second(world, id)
+	print(`{entity} now owned by {owner}`)
+end)
 ```
 
 ## Common Patterns
 
 **Resource cleanup:**
 
-```ts
-const Model = world.component<Instance>();
+```luau
+local Model = world:component() :: jecs.Id<Instance>
 
-world.set(Model, OnRemove, (entity, id, deleted) => {
-	const model = world.get(entity, Model);
-	model?.Destroy();
-});
+world:set(Model, jecs.OnRemove, function(entity, id, delete)
+	local model = world:get(entity, Model)
+	if model then
+		model:Destroy()
+	end
+end)
 ```
 
 **Syncing state:**
 
-```ts
-const Position = world.component<Vector3>();
-const Model = world.component<BasePart>();
+```luau
+local Position = world:component() :: jecs.Id<Vector3>
+local Part = world:component() :: jecs.Id<BasePart>
 
-world.set(Position, OnChange, (entity, id, position) => {
-	const model = world.get(entity, Model);
-	if (model) {
-		model.CFrame = new CFrame(position);
-	}
-});
+world:set(Position, jecs.OnChange, function(entity, id, position)
+	local part = world:get(entity, Part)
+	if part then
+		part.CFrame = CFrame.new(position)
+	end
+end)
 ```
 
 ## Hooks vs Signals

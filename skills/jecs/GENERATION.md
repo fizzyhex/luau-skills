@@ -1,5 +1,5 @@
 # Generation Info
 
-- **Source:** `sources/jecs`
-- **Git SHA:** `be74de6b3efb022bb6b7ba4b1432a70f4e74b03e`
-- **Generated:** 2026-01-29
+- **Source:** `sources/jecs` (https://github.com/Ukendio/jecs, v0.11.0)
+- **Git SHA:** `35e92ecaf2b76d63805b3873e78eded37d9d46ad`
+- **Generated:** 2026-10-31

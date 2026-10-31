@@ -15,26 +15,28 @@ performance.
 An archetype represents a unique combination of components. All entities with
 exactly the same component set belong to the same archetype.
 
-```ts
-import Jecs from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
 
-const world = Jecs.world();
+local world = jecs.world()
 
-const Position = world.component<Vector3>();
-const Velocity = world.component<Vector3>();
-const Mass = world.component<number>();
+local Position = world:component() :: jecs.Id<Vector3>
+local Velocity = world:component() :: jecs.Id<Vector3>
+local Mass = world:component() :: jecs.Id<number>
 
-const entityId = world.entity();
-world.set(entityId, Position, Vector3.zero); // creates archetype [Position]
-world.set(entityId, Velocity, Vector3.zero); // moves to archetype [Position, Velocity]
+local e1 = world:entity()
+world:set(e1, Position, Vector3.zero) -- creates archetype [Position]
+world:set(e1, Velocity, Vector3.zero) -- moves to archetype [Position, Velocity]
 
-const entityId2 = world.entity();
-world.set(entityId2, Position, Vector3.zero); // archetype [Position] exists
-world.set(entityId2, Velocity, Vector3.zero); // archetype [Position, Velocity] exists
-world.set(entityId2, Mass, 100); // creates archetype [Position, Velocity, Mass]
+local e2 = world:entity()
+world:set(e2, Position, Vector3.zero) -- archetype [Position] exists
+world:set(e2, Velocity, Vector3.zero) -- archetype [Position, Velocity] exists
+world:set(e2, Mass, 100) -- creates archetype [Position, Velocity, Mass]
 
-// e1 in [Position, Velocity]
-// e2 in [Position, Velocity, Mass]
+-- e1 in [Position, Velocity]
+-- e2 in [Position, Velocity, Mass]
 ```
 
 ## Archetype Transitions
@@ -68,13 +70,14 @@ exists, a new archetype is created.
 Fragmentation occurs when entities spread across many archetypes, especially
 with relationships.
 
-```ts
-const Likes = world.component();
+```luau
+local pair = jecs.pair
+local Likes = world:entity()
 
-world.add(e1, pair(Likes, alice)); // archetype [pair(Likes, alice)]
-world.add(e2, pair(Likes, bob)); // archetype [pair(Likes, bob)]
-world.add(e3, pair(Likes, charlie)); // archetype [pair(Likes, charlie)]
-// 3 different archetypes!
+world:add(e1, pair(Likes, alice)) -- archetype [pair(Likes, alice)]
+world:add(e2, pair(Likes, bob)) -- archetype [pair(Likes, bob)]
+world:add(e3, pair(Likes, charlie)) -- archetype [pair(Likes, charlie)]
+-- 3 different archetypes!
 ```
 
 **Impact:**
@@ -92,45 +95,44 @@ profiling shows a bottleneck.
 
 **Alternative when you don't need relationship semantics:**
 
-```ts
-// Relationship approach: One archetype per target, but auto-cleanup on delete
-world.add(entity, pair(Likes, uniqueTarget));
+```luau
+-- Relationship approach: One archetype per target, but auto-cleanup on delete
+world:add(entity, pair(Likes, uniqueTarget))
 
-// Data approach: Shared archetype, but manual cleanup required
-const LikesSomeone = Jecs.tag();
-world.add(entity, LikesSomeone);
-world.set(entity, LikesTarget, targetEntity); // Store target as component data
+-- Data approach: Shared archetype, but manual cleanup required
+local LikesSomeone = jecs.tag()
+local LikesTarget = world:component() :: jecs.Id<jecs.Entity>
+world:add(entity, LikesSomeone)
+world:set(entity, LikesTarget, targetEntity) -- Store target as component data
 ```
 
 **Batch component operations:**
 
-```ts
-import { bulk_insert, bulk_remove } from "@rbxts/jecs";
+```luau
+-- BAD: Multiple archetype transitions
+world:set(entity, Position, Vector3.zero)
+world:set(entity, Velocity, Vector3.zero)
+world:set(entity, Mass, 100)
 
-// BAD: Multiple archetype transitions
-world.set(entity, Position, Vector3.zero);
-world.set(entity, Velocity, Vector3.zero);
-world.set(entity, Mass, 100);
+-- BETTER: Single transition
+jecs.bulk_insert(world, entity, { Position, Velocity, Mass }, { Vector3.zero, Vector3.zero, 100 })
 
-// BETTER: Single transition
-bulk_insert(world, entity, [Position, Velocity, Mass], [Vector3.zero, Vector3.zero, 100]);
-
-// Batch removal
-bulk_remove(world, entity, [Velocity, Mass]);
+-- Batch removal
+jecs.bulk_remove(world, entity, { Velocity, Mass })
 ```
 
 ## Archetype Lifecycle
 
 **Empty archetypes persist** for recycling. They don't slow down queries
-(`query.archetypes()` skips empty archetypes automatically).
+(`query:archetypes()` skips empty archetypes automatically).
 
 **Archetypes are invalidated** (auto-deleted) when one of their component IDs
 can no longer be used (e.g., relationship target entity is deleted).
 
 **Manual cleanup** removes empty archetypes to free memory:
 
-```ts
-world.cleanup();
+```luau
+world:cleanup()
 ```
 
 **When to call `cleanup()`:**
@@ -153,8 +155,8 @@ world.cleanup();
 1. Minimize component add/remove during gameplay
 2. Prefer `set` over `add`+`set`
 3. Cache frequently-used queries
-4. Use `bulk_insert`/`bulk_remove` for batched operations
-5. Call `cleanup()` periodically or after mass deletions
+4. Use `jecs.bulk_insert`/`jecs.bulk_remove` for batched operations
+5. Call `world:cleanup()` periodically or after mass deletions
 
 <!--
 Source references:

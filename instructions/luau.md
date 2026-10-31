@@ -1,0 +1,2 @@
+- Target strict mode (`--!strict`) and the new type solver.
+- Prefer Roblox-relevant examples; flag features that only exist in standalone Luau.

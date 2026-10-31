@@ -1,157 +1,157 @@
 ---
 name: Timer Mocks
 description: |
-    Controlling time with fake timers for tick, task.delay, task.wait, os.time, DateTime, and
-    engine frame time.
+    Controlling time with fake timers for delay, tick, task.delay, task.wait,
+    os.time, DateTime, and engine frame time.
 ---
 
 # Timer Mocks
 
 ## Import
 
-```ts
-import { expect, it, jest } from "@rbxts/jest-globals";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
+local it = JestGlobals.it
+local jest = JestGlobals.jest
 ```
 
 ## Enable Fake Timers
 
-```ts
-jest.useFakeTimers();
+```luau
+jest.useFakeTimers()
 ```
 
-Replaces these timers with fakes:
+Replaces these with fakes:
 
+- `delay`, `tick`, `time`
 - `task.delay`, `task.cancel`, `task.wait`
 - `os.time`, `os.clock`
 - `DateTime`
 
-Restore originals:
+Restore the originals (commonly in `afterEach`):
 
-```ts
-jest.useRealTimers();
+```luau
+jest.useRealTimers()
 ```
+
+Both return the `jest` object.
+
+**Units:** `task.delay` takes seconds, but every Jest timer API
+(`advanceTimersByTime`, `setEngineFrameTime`) takes **milliseconds**.
 
 ## Running Timers
 
 ### `jest.runAllTimers()`
 
-Execute all pending and subsequently scheduled timers:
+Execute all pending timers, including ones they schedule, until the queue is
+empty:
 
-```ts
-jest.useFakeTimers();
+```luau
+jest.useFakeTimers()
 
-it("should fire callback after delay", () => {
-	expect.assertions(2);
+it("fires the callback after a delay", function()
+	local callback, callbackFn = jest.fn()
 
-	const [callback] = jest.fn();
+	task.delay(1, callbackFn)
 
-	task.delay(1, callback);
+	expect(callback).never.toHaveBeenCalled()
 
-	expect(callback).never.toHaveBeenCalled();
+	jest.runAllTimers()
 
-	jest.runAllTimers();
-
-	expect(callback).toHaveBeenCalledTimes(1);
-});
+	expect(callback).toHaveBeenCalledTimes(1)
+end)
 ```
+
+Pass the forwarding function (second return value of `jest.fn()`) to
+`task.delay`, which requires a real function.
 
 ### `jest.runOnlyPendingTimers()`
 
-Execute only currently pending timers (not newly scheduled ones). Use for
-recursive timers to avoid infinite loops:
+Execute only currently pending timers, not ones they schedule. Use for
+recursive timers that would make `runAllTimers` loop forever:
 
-```ts
-it("should handle recursive timer", () => {
-	expect.assertions(1);
+```luau
+it("handles a recursive timer", function()
+	local callback = jest.fn()
 
-	const [callback] = jest.fn();
+	local function loop()
+		task.delay(1, function()
+			callback()
+			loop() -- schedules another timer
+		end)
+	end
+	loop()
 
-	task.delay(1, () => {
-		callback();
-		task.delay(10, () => {
-			/* do something else */
-		}); // schedules more
-	});
+	jest.runOnlyPendingTimers()
 
-	jest.runOnlyPendingTimers();
-
-	expect(callback).toHaveBeenCalledTimes(1);
-});
+	expect(callback).toHaveBeenCalledTimes(1)
+end)
 ```
 
 ### `jest.advanceTimersByTime(ms)`
 
-Advance time by a specific amount. Executes all timers due within that window:
+Advance time by `ms` milliseconds, running every timer due in that window
+(including ones scheduled during it):
 
-```ts
-jest.useFakeTimers();
+```luau
+it("fires after one second", function()
+	local callback, callbackFn = jest.fn()
 
-it("should advance by 1 second", () => {
-	expect.assertions(2);
+	task.delay(1, callbackFn)
 
-	const [callback] = jest.fn();
+	jest.advanceTimersByTime(999)
+	expect(callback).never.toHaveBeenCalled()
 
-	task.delay(1, callback);
-
-	expect(callback).never.toHaveBeenCalled();
-
-	jest.advanceTimersByTime(1);
-
-	expect(callback).toHaveBeenCalledTimes(1);
-});
+	jest.advanceTimersByTime(1)
+	expect(callback).toHaveBeenCalledTimes(1)
+end)
 ```
 
 ### `jest.advanceTimersToNextTimer(steps?)`
 
-Advance to the next scheduled timer. Optional `steps` to advance multiple
-timers.
+Advance to the next scheduled timer and run it. `steps` runs that many
+successive timers.
 
-## Querying Timers
+## Querying and Clearing Timers
 
-```ts
-jest.getTimerCount(); // number of pending fake timers
-```
-
-## Clearing Timers
-
-```ts
-jest.clearAllTimers(); // remove all pending timers without executing
+```luau
+jest.getTimerCount() -- number of fake timers still pending
+jest.clearAllTimers() -- drop all pending timers without running them
 ```
 
 ## System Time
 
-```ts
-jest.setSystemTime(1000); // set fake time (ms or DateTime)
-jest.getRealSystemTime(); // get actual wall clock time
+```luau
+jest.setSystemTime(1000) -- set the fake clock (number or DateTime)
+jest.getRealSystemTime() -- real wall-clock time while time is mocked
 ```
 
-`setSystemTime` affects `DateTime.now()` and time functions but does not trigger
-timer execution.
+`setSystemTime` changes the current fake time (e.g. what `DateTime.now()`
+reports) but does not fire any timers.
 
 ## Engine Frame Time (Roblox-Specific)
 
-By default, fake timers run in continuous time. To simulate Roblox's frame-based
-scheduler:
+By default, fake timers run in continuous time. The engine only resumes
+timers once per frame; to simulate that, set a frame time in milliseconds:
 
-```ts
-jest.setEngineFrameTime(1000 / 60); // ~16.67ms per frame
+```luau
+it("processes a short delay on the next frame", function()
+	local callback, callbackFn = jest.fn()
+	jest.setEngineFrameTime(1000 / 60) -- ~16.67 ms per frame
 
-it("should process frame-based timer", () => {
-	expect.assertions(1);
+	task.delay(0.01, callbackFn)
+	expect(callback).never.toHaveBeenCalled()
 
-	const [callback] = jest.fn();
-	task.delay(0.01, callback);
+	-- Advancing by 0 still steps one frame, like task.wait()
+	jest.advanceTimersByTime(0)
 
-	// Advance by one frame
-	jest.advanceTimersByTime(0);
-
-	expect(callback).toHaveBeenCalledTimes(1);
-});
-
-jest.getEngineFrameTime(); // current frame time setting
+	expect(callback).toHaveBeenCalledTimes(1)
+end)
 ```
 
-Set to `0` for continuous time (default).
+`jest.getEngineFrameTime()` returns the current setting. `0` (the default)
+means continuous time.
 
 <!--
 Source references:

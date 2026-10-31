@@ -1,110 +1,131 @@
 ---
 name: Module Mocking
 description: |
-    Mocking modules with jest.mock(), jest.unmock(), jest.requireActual(), and
-    jest.isolateModules().
+    Mocking modules with jest.mock(), jest.unmock(), jest.requireActual(),
+    jest.resetModules() and jest.isolateModules().
 ---
 
 # Module Mocking
 
 ## Import
 
-```ts
-import { expect, jest } from "@rbxts/jest-globals";
+```luau
+local JestGlobals = require(Packages.JestGlobals)
+local expect = JestGlobals.expect
+local jest = JestGlobals.jest
+local beforeEach = JestGlobals.beforeEach
+local it = JestGlobals.it
 ```
+
+Jest Roblox intercepts `require` inside test files (and the modules they
+load). Modules are identified by `ModuleScript` or by a
+[require-by-string](https://create.roblox.com/docs/reference/engine/globals/LuaGlobals/require)
+path.
 
 ## `jest.mock(module, factory)`
 
-Replace a module with a mock when it's imported. The factory function is
-**required** (unlike JS Jest):
+Replace a module with the factory's return value whenever it is required. The
+factory is **required** (there is no automocking or `__mocks__` folder):
 
-```ts
-jest.resetModules();
+```luau
+local MyModule = script.Parent.Parent.MyModule
 
-jest.mock<typeof import("src/my-module")>(Workspace.myModule, () => {
-	return {
-		default: jest.fn(() => 42)[0],
-		helper: jest.fn(() => "mocked")[0],
-	};
-});
+beforeEach(function()
+	jest.resetModules()
+	jest.mock(MyModule, function()
+		return {
+			getValue = jest.fn(function()
+				return 42
+			end),
+			helper = jest.fn(function()
+				return "mocked"
+			end),
+		}
+	end)
+end)
 
-it("should use mocked module", async () => {
-	expect.assertions(2);
+it("uses the mocked module", function()
+	local myModule = require(MyModule) :: any
 
-	const myModule = await import("src/my-module");
-
-	expect(myModule.default()).toBe(42);
-	expect(myModule.helper()).toBe("mocked");
-});
+	expect(myModule.getValue()).toBe(42)
+	expect(myModule.helper()).toBe("mocked")
+end)
 ```
 
-Mocks are scoped to the file that calls `jest.mock`. Other files importing the
-same module get the real implementation.
+Require the module **after** calling `jest.mock` (inside the test or after
+the mock call), since already-required modules are cached. Mocks are scoped
+to the file that calls `jest.mock`; other test files get the real module.
+
+The type checker still sees the real module's type, so cast when the mock's
+shape differs.
 
 ## `jest.unmock(module)`
 
-Remove a mock, restoring the real module:
+Stop mocking, so `require` returns the real module:
 
-```ts
-jest.unmock(Workspace.myModule);
-const real = await import("src/my-module");
+```luau
+it("is not mocked", function()
+	jest.unmock(MyModule)
+	local real = require(MyModule)
+	expect(real).toEqual({})
+end)
 ```
 
 ## `jest.requireActual(module)`
 
-Get the real module even when it's mocked:
+Get the real module even while it is mocked, e.g. for a partial mock:
 
-```ts
-jest.mock<typeof import("src/utils")>(Workspace.utils, () => {
-	const actual = jest.requireActual<typeof import("src/utils")>(Workspace.utils);
+```luau
+local Utils = script.Parent.Parent.Utils
+
+jest.mock(Utils, function()
+	local actual = jest.requireActual(Utils)
 	return {
-		mockedFunc: jest.fn()[0],
-		realFunc: actual.realFunc,
-	};
-});
+		mockedFunc = jest.fn(),
+		realFunc = actual.realFunc,
+	}
+end)
 ```
 
 ## `jest.resetModules()`
 
-Clear the module cache. Subsequent imports get fresh copies:
+Clear the module registry. Subsequent `require` calls return fresh copies:
 
-```ts
-it("should get fresh module", async () => {
-	expect.assertions(/* number of assertions */);
+```luau
+local sum1 = require(script.Parent.Parent.sum)
+jest.resetModules()
+local sum2 = require(script.Parent.Parent.sum)
 
-	jest.resetModules();
-	const module = await import("src/stateful-module");
-	// module is a fresh instance
-});
+expect(sum1).never.toBe(sum2) -- separate instances of the module
 ```
+
+Calling it in `beforeEach` isolates module-level state between tests.
 
 ## `jest.isolateModules(fn)`
 
-Create a sandboxed module registry for the callback:
+Create a sandboxed module registry for modules required inside the callback:
 
-```ts
-let isolated!: typeof import("src/my-module");
-jest.isolateModules(() => {
-	isolated = import("src/my-module").expect();
-});
+```luau
+local isolated
+jest.isolateModules(function()
+	isolated = require(script.Parent.Parent.MyModule)
+end)
 
-const normal = await import("src/my-module");
+local normal = require(script.Parent.Parent.MyModule)
 
-expect(isolated).never.toBe(normal); // different instances
+expect(isolated).never.toBe(normal) -- different instances
 ```
-
-Note: `isolateModules` takes a synchronous callback — use `import().expect()` to
-synchronously unwrap the Promise instead of `await import()`.
 
 ## Chaining
 
-Module mock functions return the `jest` object for chaining:
+`jest.mock`, `jest.unmock` and `jest.resetModules` return the `jest` object:
 
-```ts
-jest.mock<typeof import("src/a")>(Workspace.a, () => ({})).mock<typeof import("src/b")>(
-	Workspace.b,
-	() => ({}),
-);
+```luau
+jest.mock(ModuleA, function()
+	return {}
+end).mock(ModuleB, function()
+	return {}
+end)
 ```
 
 <!--

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Format
+        run: stylua --check lib hooks scripts test meta.luau
+
+      - name: Lint
+        run: selene lib hooks scripts test meta.luau
+
+      - name: Test
+        run: lune run test/run

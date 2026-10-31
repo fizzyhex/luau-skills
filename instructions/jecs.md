@@ -1,1 +1,1 @@
-- Use TypeScript over Luau for examples.
+- Use strict typed Luau for all examples (never TypeScript or roblox-ts).

@@ -7,33 +7,36 @@ description: |
 
 # Jecs Advanced API
 
-Preregistration, bulk operations, and TypeScript types.
+Preregistration, bulk operations, and exported Luau types.
 
 ## Preregistering Components
 
 Register components before world creation for stable IDs.
 
-```ts
-import Jecs, { component, meta, Name } from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
 
-// Preregister (before world)
-const Transform = component<CFrame>();
-const Velocity = component<Vector3>();
-const Dead = Jecs.tag();
+-- Preregister (before world)
+local Transform = jecs.component() :: jecs.Id<CFrame>
+local Velocity = jecs.component() :: jecs.Id<Vector3>
+local Dead = jecs.tag()
 
-// Add metadata before world
-meta(Transform, Name, "Transform");
-meta(Velocity, Name, "Velocity");
+-- Add metadata before world
+jecs.meta(Transform, jecs.Name, "Transform")
+jecs.meta(Velocity, jecs.Name, "Velocity")
 
-// Components registered when world created
-const world = Jecs.world();
+-- Components registered when world created
+local world = jecs.world()
 ```
 
 **Benefits:**
 
 - Stable component IDs across sessions
 - Metadata available immediately
-- Cleaner module structure
+- Cleaner module structure (a shared `components` ModuleScript that every
+  system requires)
 
 ## Bulk Operations
 
@@ -41,34 +44,31 @@ Insert or remove multiple components in a single archetype transition.
 
 ### bulk_insert
 
-```ts
-import { bulk_insert } from "@rbxts/jecs";
+```luau
+local Transform = world:component() :: jecs.Id<CFrame>
+local Velocity = world:component() :: jecs.Id<Vector3>
+local Mass = world:component() :: jecs.Id<number>
+local Dead = world:entity()
 
-const Transform = world.component<CFrame>();
-const Velocity = world.component<Vector3>();
-const Mass = world.component<number>();
-const Dead = world.component();
+local entityId = world:entity()
 
-const entityId = world.entity();
-
-// Insert multiple components at once
-bulk_insert(
+-- Insert multiple components at once (ids and values are parallel arrays)
+jecs.bulk_insert(
 	world,
 	entityId,
-	[Transform, Velocity, Mass, Dead],
-	[new CFrame(), new Vector3(1, 0, 0), 100, undefined],
-);
+	{ Transform, Velocity, Mass, Dead },
+	{ CFrame.identity, Vector3.new(1, 0, 0), 100, nil }
+)
 ```
 
-Tags use `undefined` as placeholder value.
+Tags use `nil` as the placeholder value. Values are not type-checked against
+their components (`values` is `{ any }`).
 
 ### bulk_remove
 
-```ts
-import { bulk_remove } from "@rbxts/jecs";
-
-// Remove multiple components at once
-bulk_remove(world, entityId, [Transform, Velocity, Mass]);
+```luau
+-- Remove multiple components at once
+jecs.bulk_remove(world, entityId, { Transform, Velocity, Mass })
 ```
 
 **Performance:** Single archetype transition vs multiple.
@@ -77,122 +77,123 @@ bulk_remove(world, entityId, [Transform, Velocity, Mass]);
 
 Access internal entity storage info.
 
-```ts
-import { record } from "@rbxts/jecs";
-
-const entityRecord = record(world, entityId);
-// entityRecord.archetype - current archetype
-// entityRecord.row - position in archetype
-// entityRecord.dense - position in dense array
+```luau
+local entityRecord: jecs.Record = jecs.record(world, entityId)
+-- entityRecord.archetype - current archetype
+-- entityRecord.row - position in archetype
+-- entityRecord.dense - position in dense array
 ```
 
 ## Component Records
 
 Access component storage metadata.
 
-```ts
-import { component_record } from "@rbxts/jecs";
-
-const compRecord = component_record(world, Transform);
-// compRecord.records - Map<ArchetypeId, column index>
-// compRecord.counts - Map<ArchetypeId, entity count>
-// compRecord.size - total entities with this component
+```luau
+local compRecord: jecs.ComponentRecord? = jecs.component_record(world, Transform)
+-- compRecord.records - { [archetypeId]: column index }
+-- compRecord.counts - { [archetypeId]: entity count }
+-- compRecord.size - total entities with this component
 ```
 
-## TypeScript Types
+## Luau Types
 
 ### Core Types
 
-```ts
-import type {
-	Archetype, // Archetype storage
-	CachedQuery, // Cached query
-	Column, // Component column
-	Entity, // Typed entity ID
-	Id, // Entity or Pair
-	Pair, // Relationship pair
-	Query, // Query object
-	Tag, // Entity with no data
-	World, // World instance
-} from "@rbxts/jecs";
+```luau
+type World = jecs.World -- World instance
+type Entity<T = nil> = jecs.Entity<T> -- Entity ID (T = data type when used as a component)
+type Id<T = any> = jecs.Id<T> -- Component or pair ID carrying data type T
+type Pair<First, Second> = jecs.Pair<First, Second> -- Relationship pair
+type Query<T...> = jecs.Query<T...> -- Uncached query
+type CachedQuery<T...> = jecs.Cached_Query<T...> -- Cached query
+type Archetype = jecs.Archetype -- Archetype storage
+type Record = jecs.Record -- Entity record
+type ComponentRecord = jecs.ComponentRecord -- Component metadata
 ```
+
+There is no separate `Tag` type: a tag is an `jecs.Entity<nil>` (what
+`jecs.tag()` and `world:entity()` return).
 
 ### Type Inference
 
-```ts
-// Component type inference
-const Health = world.component<number>();
-type HealthType = InferComponent<typeof Health>; // number
+The data type travels in the ID's phantom `__T` field. Declare it once with a
+`::` cast and the solver infers it everywhere else.
 
-// Pair type inference (first element if not tag)
-const Owns = world.component<{ amount: number }>();
-// Tag pair returns second element's type
-type ChildData = InferComponent<Pair<Tag, Entity<string>>>; // string
+```luau
+local Health = world:component() :: jecs.Id<number>
 
-type OwnsData = InferComponent<Pair<typeof Owns, Entity>>; // Gives { amount: number }
+-- Pair data type: the first element's type, unless the first is a tag,
+-- in which case the second element's type is used
+local Owns = world:component() :: jecs.Id<{ amount: number }>
+local car = world:entity()
+world:set(e, jecs.pair(Owns, car), { amount = 1 }) -- { amount: number }
+
+local Begin = world:entity() -- tag
+world:set(e, jecs.pair(Begin, Transform), CFrame.identity) -- CFrame (from Transform)
 ```
 
 ### Query Typing
 
-```ts
-// Query returns correctly typed tuple
-for (const [entity, transform, velocity] of world.query(Transform, Velocity)) {
-	// entity: Entity
-	// transform: CFrame
-	// velocity: Vector3
-}
+```luau
+-- Query values are inferred from the component IDs
+for entity, transform, velocity in world:query(Transform, Velocity) do
+	-- entity: jecs.Entity
+	-- transform: CFrame
+	-- velocity: Vector3
+end
 
-// Multiple get returns tuple
-const [transform, velocity] = world.get(entityId, Transform, Velocity);
-// transform: CFrame | undefined
-// velocity: Vector3 | undefined
+-- Multiple get returns a tuple of optionals
+local transform, velocity = world:get(entityId, Transform, Velocity)
+-- transform: CFrame?
+-- velocity: Vector3?
 ```
+
+Typed queries and `get` overloads cover up to 8 query terms and 4 `get`
+components.
 
 ## Debug Mode
 
 Enable runtime checks:
 
-```ts
-const world = Jecs.world(true); // DEBUG mode
+```luau
+local world = jecs.world(true) -- DEBUG mode
 
-// Throws on:
-// - Structural changes in OnRemove during deletion
-// - Invalid entity references
-// - Component ID misuse
+-- Throws on:
+-- - Structural changes in OnRemove during deletion
+-- - Invalid entity references
+-- - Component ID misuse
 ```
 
 ## is_tag Helper
 
-Check if component is a tag (no data):
+Check if an ID is a tag (no data):
 
-```ts
-import Jecs, { is_tag } from "@rbxts/jecs";
+```luau
+local world = jecs.world()
+local Dead = world:entity()
+local Health = world:component() :: jecs.Id<number>
 
-const world = Jecs.world();
-const Dead = world.component();
-const Health = world.component<number>();
-
-is_tag(world, Dead); // true
-is_tag(world, Health); // false
+jecs.is_tag(world, Dead) -- true
+jecs.is_tag(world, Health) -- false (world:component() is never a tag)
 ```
 
 Useful for serialization and networking logic.
 
 ## Quick Reference
 
-| Function                         | Purpose                     |
-| -------------------------------- | --------------------------- |
-| `component<T>()`                 | Preregister typed component |
-| `tag()`                          | Preregister tag             |
-| `meta(e, id, value)`             | Set metadata before world   |
-| `bulk_insert(w, e, ids, values)` | Insert multiple components  |
-| `bulk_remove(w, e, ids)`         | Remove multiple components  |
-| `record(w, e)`                   | Get entity record           |
-| `component_record(w, id)`        | Get component record        |
-| `is_tag(w, id)`                  | Check if tag                |
+| Function                              | Purpose                     |
+| ------------------------------------- | --------------------------- |
+| `jecs.component() :: jecs.Id<T>`      | Preregister typed component |
+| `jecs.tag()`                          | Preregister tag             |
+| `jecs.meta(e, id, value)`             | Set metadata before world   |
+| `jecs.bulk_insert(w, e, ids, values)` | Insert multiple components  |
+| `jecs.bulk_remove(w, e, ids)`         | Remove multiple components  |
+| `jecs.record(w, e)`                   | Get entity record           |
+| `jecs.component_record(w, id)`        | Get component record        |
+| `jecs.is_tag(w, id)`                  | Check if tag                |
 
 <!--
 Source references:
 - how_to/011_preregistering_components.luau
-- src/jecs.d.ts
+- src/jecs.luau (exported types)
 -->

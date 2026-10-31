@@ -14,75 +14,83 @@ disconnected.
 
 ## Signal Types
 
-| Signal    | Triggers When           | Signature                        |
-| --------- | ----------------------- | -------------------------------- |
-| `added`   | Component added         | `(entity, id, value) => void`    |
-| `changed` | Component value changed | `(entity, id, value) => void`    |
-| `removed` | Component removed       | `(entity, id, deleted?) => void` |
+| Signal    | Triggers When           | Callback                                     |
+| --------- | ----------------------- | -------------------------------------------- |
+| `added`   | Component added         | `(entity, id, value, oldArchetype) -> ()`    |
+| `changed` | Component value changed | `(entity, id, value, oldArchetype) -> ()`    |
+| `removed` | Component removed       | `(entity, id, delete: boolean?) -> ()`       |
+
+Each subscription returns a `() -> ()` disconnect function.
 
 ## Basic Usage
 
-```ts
-const Position = world.component<Vector3>();
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
 
-// Subscribe - returns disconnect function
-const disconnect = world.added(Position, (entity, id, value) => {
-	print(`Position added to ${entity}: ${value}`);
-});
+local world = jecs.world()
+local Position = world:component() :: jecs.Id<Vector3>
 
-// Later: unsubscribe
-disconnect();
+-- Subscribe - returns disconnect function
+local disconnect = world:added(Position, function(entity, id, value)
+	print(`Position added to {entity}: {value}`)
+end)
+
+-- Later: unsubscribe
+disconnect()
 ```
 
 ## Multiple Listeners
 
-```ts
-const Health = world.component<number>();
+```luau
+local Health = world:component() :: jecs.Id<number>
 
-// UI listener
-const disconnectUI = world.changed(Health, (entity, id, value) => {
-	updateHealthBar(entity, value);
-});
+-- UI listener
+local disconnectUI = world:changed(Health, function(entity, id, value)
+	updateHealthBar(entity, value)
+end)
 
-// Sound listener
-const disconnectSFX = world.changed(Health, (entity, id, value) => {
-	playDamageSound();
-});
+-- Sound listener
+local disconnectSFX = world:changed(Health, function(entity, id, value)
+	playDamageSound()
+end)
 
-// Remove individual listeners
-disconnectUI();
+-- Remove individual listeners
+disconnectUI()
 ```
+
+Disconnecting the same listener twice errors.
 
 ## Signals for Pairs
 
-Signals work with relationship pairs - receive full pair ID.
+Subscribing on a relationship fires for every pair with that relationship and
+receives the full pair ID.
 
-```ts
-import { pair_second } from "@rbxts/jecs";
+```luau
+local Owns = world:component() :: jecs.Id<number>
 
-const Owns = world.component<number>();
-
-// Listen to any ownership changes
-world.added(Owns, (entity, id, value) => {
-	const target = pair_second(world, id);
-	print(`${entity} now owns ${target}`);
-});
+-- Listen to any ownership changes
+world:added(Owns, function(entity, id, value)
+	local target = jecs.pair_second(world, id)
+	print(`{entity} now owns {target}`)
+end)
 ```
 
 ## Removed Signal
 
-The `removed` signal receives a `deleted` flag like hooks.
+The `removed` signal receives a `delete` flag like hooks.
 
-```ts
-world.removed(Health, (entity, id, deleted) => {
-	if (deleted) {
-		// Entity being deleted
-		return;
-	}
+```luau
+world:removed(Health, function(entity, id, delete)
+	if delete then
+		-- Entity being deleted
+		return
+	end
 
-	// Component removed normally
-	cleanupHealthEffects(entity);
-});
+	-- Component removed normally
+	cleanupHealthEffects(entity)
+end)
 ```
 
 ## Signals vs Hooks
@@ -92,13 +100,13 @@ world.removed(Health, (entity, id, deleted) => {
 **Hooks are constructors/destructors.** They define how a component itself
 initializes and cleans up.
 
-| Feature       | Signals                 | Hooks                        |
-| ------------- | ----------------------- | ---------------------------- |
-| Mental model  | Event subscription      | Constructor/Destructor       |
-| Belongs to    | External observers      | The component itself         |
-| Per component | Multiple                | One (intentional)            |
-| Disconnect    | Yes                     | No                           |
-| Set via       | `world.added(comp, fn)` | `world.set(comp, OnAdd, fn)` |
+| Feature       | Signals                 | Hooks                             |
+| ------------- | ----------------------- | --------------------------------- |
+| Mental model  | Event subscription      | Constructor/Destructor            |
+| Belongs to    | External observers      | The component itself              |
+| Per component | Multiple                | One (intentional)                 |
+| Disconnect    | Yes                     | No                                |
+| Set via       | `world:added(comp, fn)` | `world:set(comp, jecs.OnAdd, fn)` |
 
 **Use signals when:** "Other systems need to know about this component"
 
@@ -113,23 +121,26 @@ initializes and cleans up.
 
 Signals can do everything hooks do. Use signals by default. Use hooks when you
 need the slight performance gain and know you'll only ever have one listener.
+Signals occupy the component's hook slot: set any hook before the first
+subscription, never after.
 
 ## Quick Reference
 
-```ts
-// Subscribe
-const disconnect1 = world.added(Component, fn);
-const disconnect2 = world.changed(Component, fn);
-const disconnect3 = world.removed(Component, fn);
+```luau
+-- Subscribe
+local disconnect1 = world:added(Component, fn)
+local disconnect2 = world:changed(Component, fn)
+local disconnect3 = world:removed(Component, fn)
 
-// Unsubscribe
-disconnect1();
-disconnect2();
-disconnect3();
+-- Unsubscribe
+disconnect1()
+disconnect2()
+disconnect3()
 ```
 
 <!--
 Source references:
-- src/jecs.d.ts (World.added, World.changed, World.removed)
+- how_to/111_signals.luau
+- src/jecs.luau (World.added, World.changed, World.removed)
 - examples/networking/networking_send.luau
 -->

@@ -1,32 +1,25 @@
 {
-	"name": "sentinel",
-	"description": "General development workflows for typescript projects, including linting with eslint_d and more",
-	"version": "1.7.0",
+	"name": "sentinel-luau",
+	"description": "Luau development workflows: StyLua + selene lint hooks and luau-lsp type-check hooks, written in typed Luau on Lune",
+	"version": "2.0.0",
 	"author": {
-		"name": "Christopher Buss",
-		"email": "christopher.buss@pm.me",
-		"url": "https://github.com/christopher-buss"
+		"name": "Fizzy",
+		"url": "https://github.com/fizzyhex"
 	},
-	"homepage": "https://github.com/christopher-buss/skills",
-	"repository": "https://github.com/christopher-buss/skills",
+	"homepage": "https://github.com/fizzyhex/luau-skills",
+	"repository": "https://github.com/fizzyhex/luau-skills",
 	"license": "MIT",
-	"keywords": ["tdd", "typescript", "collaboration", "best-practices", "workflows"],
+	"keywords": ["luau", "roblox", "lune", "selene", "stylua", "luau-lsp", "workflows"],
 	"skills": "./no-op/",
 	"outputStyles": "./output-styles/",
 	"lspServers": {
-		"typescript": {
-			"command": "typescript-language-server",
-			"args": ["--stdio"],
+		"luau": {
+			"command": "luau-lsp",
+			"args": ["lsp"],
 			"diagnostics": false,
 			"extensionToLanguage": {
-				".cjs": "javascript",
-				".cts": "typescript",
-				".js": "javascript",
-				".jsx": "javascriptreact",
-				".mjs": "javascript",
-				".mts": "typescript",
-				".ts": "typescript",
-				".tsx": "typescriptreact"
+				".lua": "lua",
+				".luau": "luau"
 			}
 		}
 	}

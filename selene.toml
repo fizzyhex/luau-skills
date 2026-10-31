@@ -1,0 +1,4 @@
+std = "luau"
+
+[lints]
+mixed_table = "allow"

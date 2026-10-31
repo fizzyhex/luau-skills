@@ -21,34 +21,34 @@ If **yes** → separate components. If **no** → same component.
 
 ### Transform is atomic
 
-```typescript
-// WRONG: Over-split
-const PositionX = world.component<number>();
-const PositionY = world.component<number>();
-const Rotation = world.component<Vector3>();
+```luau
+-- WRONG: Over-split
+local PositionX = world:component() :: jecs.Id<number>
+local PositionY = world:component() :: jecs.Id<number>
+local Rotation = world:component() :: jecs.Id<Vector3>
 
-// RIGHT: Transform is one concept
-const Transform = world.component<CFrame>();
+-- RIGHT: Transform is one concept
+local Transform = world:component() :: jecs.Id<CFrame>
 ```
 
 No system needs position without rotation. They form one semantic unit.
 
 ### Character data is NOT atomic
 
-```typescript
-// WRONG: Under-split
-interface Character {
-	name: string;
-	health: number;
-	transform: CFrame;
-	velocity: Vector3;
+```luau
+-- WRONG: Under-split
+type Character = {
+	name: string,
+	health: number,
+	transform: CFrame,
+	velocity: Vector3,
 }
 
-// RIGHT: Split by access pattern
-const Transform = world.component<CFrame>();
-const Velocity = world.component<Vector3>();
-const Health = world.component<number>();
-const DisplayName = world.component<string>();
+-- RIGHT: Split by access pattern
+local Transform = world:component() :: jecs.Id<CFrame>
+local Velocity = world:component() :: jecs.Id<Vector3>
+local Health = world:component() :: jecs.Id<number>
+local DisplayName = world:component() :: jecs.Id<string>
 ```
 
 Movement system needs transform/velocity. Health system needs health. UI system
@@ -58,44 +58,45 @@ needs display name. Different access patterns = different components.
 
 Group data that represents one concept:
 
-```typescript
-// Health split: not all damageable entities need MaxHealth
-const Health = world.component<number>(); // Current HP, required for damage
-const MaxHealth = world.component<number>(); // Optional: for regen, UI, etc.
+```luau
+-- Health split: not all damageable entities need MaxHealth
+local Health = world:component() :: jecs.Id<number> -- Current HP, required for damage
+local MaxHealth = world:component() :: jecs.Id<number> -- Optional: for regen, UI, etc.
 
-// or
-const Health = world.component<number>();
-const Max = world.component();
-const MaxHealth = pair(Max, Health); // Tag to indicate MaxHealth exists
+-- or: Max is a tag, so the pair carries Health's type (number)
+local Max = world:entity()
+local MaxHealthPair = jecs.pair(Max, Health)
+world:set(entity, MaxHealthPair, 100)
 
-// Transform as one concept
-const Transform = world.component<CFrame>();
+-- Transform as one concept
+local Transform = world:component() :: jecs.Id<CFrame>
 
-// Damage event as one concept
-const DamageEvent = world.component<{
-	amount: number;
-	source: Entity;
-	type: DamageType;
-}>();
+-- Damage event as one concept
+type DamageEventData = {
+	amount: number,
+	source: jecs.Entity,
+	type: DamageType,
+}
+local DamageEvent = world:component() :: jecs.Id<DamageEventData>
 ```
 
 ## Change Rate Separation
 
 Separate data that changes at different rates:
 
-```typescript
-// Changes every frame
-const Transform = world.component<CFrame>();
-const Velocity = world.component<Vector3>();
+```luau
+-- Changes every frame
+local Transform = world:component() :: jecs.Id<CFrame>
+local Velocity = world:component() :: jecs.Id<Vector3>
 
-// Changes occasionally
-const Health = world.component<number>();
-const Mana = world.component<number>();
+-- Changes occasionally
+local Health = world:component() :: jecs.Id<number>
+local Mana = world:component() :: jecs.Id<number>
 
-// Changes rarely/never
-const MaxHealth = world.component<number>(); // Set at spawn
-const DisplayName = world.component<string>(); // Never changes
-const Team = world.component<TeamId>(); // Rarely changes
+-- Changes rarely/never
+local MaxHealth = world:component() :: jecs.Id<number> -- Set at spawn
+local DisplayName = world:component() :: jecs.Id<string> -- Never changes
+local Team = world:component() :: jecs.Id<TeamId> -- Rarely changes
 ```
 
 Why? Separating by change rate often aligns with access patterns—systems
@@ -105,39 +106,40 @@ processing movement don't need display names. This improves query specificity.
 
 Not all entities need all data. Use component presence to indicate capability:
 
-```typescript
-// Only entities that can move have velocity
-const Velocity = world.component<Vector3>();
+```luau
+-- Only entities that can move have velocity
+local Velocity = world:component() :: jecs.Id<Vector3>
 
-// Only entities that can be damaged have health
-const Health = world.component<number>();
+-- Only entities that can be damaged have health
+local Health = world:component() :: jecs.Id<number>
 
-// Only entities that are rendered have a model
-const Model = world.component<Instance>();
+-- Only entities that are rendered have a model
+local Model = world:component() :: jecs.Id<Instance>
 ```
 
 Query automatically filters:
 
-```typescript
-// Only processes entities that CAN move
-for (const [entityId, transform, velocity] of world.query(Transform, Velocity)) {
-	// ...
-}
+```luau
+-- Only processes entities that CAN move
+for entityId, transform, velocity in world:query(Transform, Velocity) do
+	-- ...
+end
 ```
 
 ## Tags vs Data Components
 
 **Tags:** Components with no data, presence indicates state/category.
 
-```typescript
-// Tags for classification
-const IsPlayer = world.component(); // No type = tag
-const IsEnemy = world.component();
-const IsProjectile = world.component();
+```luau
+-- Tags for classification (jecs.tag() or world:entity(); world:component()
+-- always creates a data component)
+local IsPlayer = jecs.tag()
+local IsEnemy = jecs.tag()
+local IsProjectile = jecs.tag()
 
-// Usage
-world.add(entity, IsPlayer);
-world.query(Health).with(IsEnemy); // All enemies with health
+-- Usage
+world:add(entity, IsPlayer)
+world:query(Health):with(IsEnemy) -- All enemies with health
 ```
 
 **Key insight: Tags themselves cost nothing. The archetype transition does.**
@@ -155,14 +157,14 @@ scale.
 
 **For hot paths (thousands/frame):** Consider whether you need the transition.
 
-```typescript
-// FINE: Infrequent state changes
-const IsStunned = world.component();
-world.add(entity, IsStunned);
+```luau
+-- FINE: Infrequent state changes
+local IsStunned = jecs.tag()
+world:add(entity, IsStunned)
 
-// CONSIDER: High-frequency state changes in performance-critical code
-const CombatState = world.component<{ stunned: boolean }>();
-world.set(entity, CombatState, { stunned: true }); // In-place, no transition
+-- CONSIDER: High-frequency state changes in performance-critical code
+local CombatState = world:component() :: jecs.Id<{ stunned: boolean }>
+world:set(entity, CombatState, { stunned = true }) -- In-place, no transition
 ```
 
 **Rule of thumb:** Profile before optimizing transitions.
@@ -175,17 +177,17 @@ states (idle/walking/running/jumping) - use a single data component.
 
 Components can hold complex data. Don't over-flatten:
 
-```typescript
-// Fine: Arrays when they're accessed as a unit
-const Waypoints = world.component<Array<Vector3>>();
-const Abilities = world.component<Array<AbilityId>>();
+```luau
+-- Fine: Arrays when they're accessed as a unit
+local Waypoints = world:component() :: jecs.Id<{ Vector3 }>
+local Abilities = world:component() :: jecs.Id<{ AbilityId }>
 
-// Fine: Nested structures when they're one concept
-const Stats = world.component<{
-	dexterity: number;
-	intelligence: number;
-	strength: number;
-}>();
+-- Fine: Nested structures when they're one concept
+local Stats = world:component() :: jecs.Id<{
+	dexterity: number,
+	intelligence: number,
+	strength: number,
+}>
 ```
 
 **When to externalize:**
@@ -197,14 +199,14 @@ const Stats = world.component<{
 
 Store references to external systems rather than duplicating data:
 
-```typescript
-// Handles to Roblox-managed resources
-const Model = world.component<Model>();
-const Animation = world.component<AnimationTrack>();
+```luau
+-- Handles to Roblox-managed resources
+local Model = world:component() :: jecs.Id<Model>
+local Animation = world:component() :: jecs.Id<AnimationTrack>
 
-// Handles to external systems
-const NavAgentId = world.component<number>(); // Pathfinding system
-const PhysicsBodyId = world.component<number>(); // Physics simulation
+-- Handles to external systems
+local NavAgentId = world:component() :: jecs.Id<number> -- Pathfinding system
+local PhysicsBodyId = world:component() :: jecs.Id<number> -- Physics simulation
 ```
 
 For transform hierarchies specifically, Roblox's Instance hierarchy already
@@ -215,15 +217,15 @@ Roblox manage the spatial hierarchy rather than reimplementing it in ECS.
 
 Storing entity IDs in components (called "entity members") is a key pattern:
 
-```typescript
-// Entity members - store entity reference as component data
-const Target = world.component<Entity>();
-const Parent = world.component<Entity>();
-const LastAttacker = world.component<Entity>();
+```luau
+-- Entity members - store entity reference as component data
+local Target = world:component() :: jecs.Id<jecs.Entity>
+local Parent = world:component() :: jecs.Id<jecs.Entity>
+local LastAttacker = world:component() :: jecs.Id<jecs.Entity>
 
-// Usage
-world.set(attacker, Target, enemy); // No fragmentation
-const target = world.get(attacker, Target);
+-- Usage
+world:set(attacker, Target, enemy) -- No fragmentation
+local target = world:get(attacker, Target)
 ```
 
 **Entity members** — Use when:
@@ -240,16 +242,16 @@ const target = world.get(attacker, Target);
 - Want auto-cleanup on target deletion
 - Few unique targets
 
-```typescript
-// Entity member: attacker → target (forward only)
-const AttackTarget = world.component<Entity>();
-world.set(attacker, AttackTarget, enemy);
+```luau
+-- Entity member: attacker → target (forward only)
+local AttackTarget = world:component() :: jecs.Id<jecs.Entity>
+world:set(attacker, AttackTarget, enemy)
 
-// Relationship: query all children of a parent (reverse lookup)
-world.add(child, pair(ChildOf, parent));
-for (const [id] of world.query(Transform).with(pair(ChildOf, parent))) {
-	// All children of this parent
-}
+-- Relationship: query all children of a parent (reverse lookup)
+world:add(child, pair(jecs.ChildOf, parent))
+for id in world:query(Transform):with(pair(jecs.ChildOf, parent)) do
+	-- All children of this parent
+end
 ```
 
 ### Using Both Together
@@ -257,23 +259,24 @@ for (const [id] of world.query(Transform).with(pair(ChildOf, parent))) {
 These patterns aren't mutually exclusive. For composed entities (a car with
 hull, motor, wheels), use **both**:
 
-```typescript
-// ChildOf for lifecycle: deletion cascades, serialization
-world.add(hull, pair(ChildOf, car));
-world.add(motor, pair(ChildOf, car));
-world.add(wheel1, pair(ChildOf, car));
+```luau
+-- ChildOf for lifecycle: deletion cascades, serialization
+world:add(hull, pair(jecs.ChildOf, car))
+world:add(motor, pair(jecs.ChildOf, car))
+world:add(wheel1, pair(jecs.ChildOf, car))
 
-// Entity members for operational access: direct lookup in systems
-const CarParts = world.component<{
-	hull: Entity;
-	motor: Entity;
-	wheels: [Entity, Entity, Entity, Entity];
-}>();
-world.set(car, CarParts, {
-	hull,
-	motor,
-	wheels: [wheel1, wheel2, wheel3, wheel4],
-});
+-- Entity members for operational access: direct lookup in systems
+type CarPartsData = {
+	hull: jecs.Entity,
+	motor: jecs.Entity,
+	wheels: { jecs.Entity }, -- always 4
+}
+local CarParts = world:component() :: jecs.Id<CarPartsData>
+world:set(car, CarParts, {
+	hull = hull,
+	motor = motor,
+	wheels = { wheel1, wheel2, wheel3, wheel4 },
+})
 ```
 
 ChildOf gives you generic operations (delete car → children deleted). Entity
@@ -287,17 +290,17 @@ are easier to detect via `jecs.IS_PAIR`.
 
 ### Mistake: God component
 
-```typescript
-// BAD: Everything in one component
-interface Entity {
-	buffs: Array<Buff>;
-	equipment: Equipment;
-	health: number;
-	inventory: Array<Item>;
-	mana: number;
-	transform: CFrame;
-	velocity: Vector3;
-	// ... 20 more fields
+```luau
+-- BAD: Everything in one component
+type Everything = {
+	buffs: { Buff },
+	equipment: Equipment,
+	health: number,
+	inventory: { Item },
+	mana: number,
+	transform: CFrame,
+	velocity: Vector3,
+	-- ... 20 more fields
 }
 ```
 
@@ -305,31 +308,27 @@ interface Entity {
 
 ### Mistake: Primitive explosion
 
-```typescript
-// BAD: Every field is a component
-const HealthCurrent = world.component<number>();
-const HealthMax = world.component<number>();
-const HealthRegeneration = world.component<number>();
-const ManaPool = world.component<number>();
-const ManaMax = world.component<number>();
-// 50+ components for one entity type
+```luau
+-- BAD: Every field is a component
+local HealthCurrent = world:component() :: jecs.Id<number>
+local HealthMax = world:component() :: jecs.Id<number>
+local HealthRegeneration = world:component() :: jecs.Id<number>
+local ManaPool = world:component() :: jecs.Id<number>
+local ManaMax = world:component() :: jecs.Id<number>
+-- 50+ components for one entity type
 ```
 
 **Fix:** Group semantically related data.
 
 ### Mistake: Inheritance thinking
 
-```typescript
-// BAD: Trying to model inheritance
-interface BaseCharacter {
-	transform: CFrame;
-}
-interface Enemy extends BaseCharacter {
-	aiState: AIState;
-}
-interface Player extends BaseCharacter {
-	inventory: Array<Item>;
-}
+```luau
+-- BAD: Trying to model inheritance (metatables / __index chains)
+local BaseCharacter = {}
+BaseCharacter.__index = BaseCharacter
+
+local Enemy = setmetatable({}, BaseCharacter) -- adds aiState
+local Player = setmetatable({}, BaseCharacter) -- adds inventory
 ```
 
 **Fix:** Composition. All characters have Transform. Players also have
@@ -337,19 +336,19 @@ Inventory. Enemies also have AIState. No inheritance needed.
 
 ### Mistake: Enums as separate components
 
-```typescript
-// BAD: One component per state
-const StateIdle = world.component();
-const StateWalking = world.component();
-const StateRunning = world.component();
-const StateJumping = world.component();
+```luau
+-- BAD: One component per state
+local StateIdle = jecs.tag()
+local StateWalking = jecs.tag()
+local StateRunning = jecs.tag()
+local StateJumping = jecs.tag()
 ```
 
 **Fix:** One component with enum value.
 
-```typescript
-type State = "idle" | "jumping" | "running" | "walking";
-const CharacterState = world.component<State>();
+```luau
+type State = "idle" | "jumping" | "running" | "walking"
+local CharacterState = world:component() :: jecs.Id<State>
 ```
 
 ## Checklist

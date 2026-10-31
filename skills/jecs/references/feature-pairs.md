@@ -11,69 +11,69 @@ Pairs encode entity-to-entity relationships: `(Relationship, Target)`.
 
 ## Creating Pairs
 
-```ts
-import Jecs, { pair, Wildcard } from "@rbxts/jecs";
+```luau
+--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local jecs = require(ReplicatedStorage.Packages.jecs)
+local pair = jecs.pair
 
-const world = Jecs.world();
-const Likes = world.component();
+local world = jecs.world()
+local Likes = world:entity()
 
-const alice = world.entity();
-const bob = world.entity();
+local alice = world:entity()
+local bob = world:entity()
 
-// Add relationship
-world.add(bob, pair(Likes, alice)); // bob likes alice
+-- Add relationship
+world:add(bob, pair(Likes, alice)) -- bob likes alice
 
-// Check relationship
-world.has(bob, pair(Likes, alice)); // true
-world.has(bob, pair(Likes, Wildcard)); // true (likes anyone)
+-- Check relationship
+world:has(bob, pair(Likes, alice)) -- true
+world:has(bob, pair(Likes, jecs.Wildcard)) -- true (likes anyone)
 ```
 
 ## Pairs with Data
 
-First element determines data type.
+First element determines data type (or the second, if the first is a tag).
 
-```ts
-import { pair } from "@rbxts/jecs";
-
-interface OwnershipData {
-	since: string;
+```luau
+type OwnershipData = {
+	since: string,
 }
 
-const Owns = world.component<OwnershipData>();
-const car = world.entity();
+local Owns = world:component() :: jecs.Id<OwnershipData>
+local car = world:entity()
 
-world.set(bob, pair(Owns, car), { since: "2024-01-01" });
+world:set(bob, pair(Owns, car), { since = "2024-01-01" })
 
-const data = world.get(bob, pair(Owns, car));
-assert(data !== undefined, "Ownership data should be defined");
-print(data.since); // "2024-01-01"
+local data = assert(world:get(bob, pair(Owns, car)), "Ownership data should be defined")
+print(data.since) -- "2024-01-01"
 ```
 
 ## Built-in Relationships
 
 ### ChildOf (Parent-Child Hierarchy)
 
-```ts
-import { ChildOf, pair } from "@rbxts/jecs";
+```luau
+local ChildOf = jecs.ChildOf
 
-const parent = world.entity();
-const child = world.entity();
+local parent = world:entity()
+local child = world:entity()
 
-world.add(child, pair(ChildOf, parent));
+world:add(child, pair(ChildOf, parent))
 
-// Get parent
-world.parent(child); // returns parent
-world.target(child, ChildOf); // same thing
+-- Get parent
+world:parent(child) -- returns parent
+world:target(child, ChildOf) -- same thing
 
-// Iterate children
-for (const childEntityId of world.children(parent)) {
-	print(childEntityId);
-}
+-- Iterate children
+for childEntityId in world:children(parent) do
+	print(childEntityId)
+end
 
-// Or via query
-for (const [childEntityId] of world.query(pair(ChildOf, parent))) {
-	print(childEntityId);
-}
+-- Or via query
+for childEntityId in world:query(pair(ChildOf, parent)) do
+	print(childEntityId)
+end
 ```
 
 **Note:** ChildOf is exclusive (one parent only) and cascades deletion. Use
@@ -85,105 +85,100 @@ See `ecs-design` skill for when to use both together.
 
 Only one target allowed per relationship type.
 
-```ts
-import { Exclusive, pair } from "@rbxts/jecs";
+```luau
+local item = world:entity()
+local player1 = world:entity()
+local player2 = world:entity()
 
-const item = world.entity();
-const player1 = world.entity();
-const player2 = world.entity();
+local BelongsTo = world:entity()
+world:add(BelongsTo, jecs.Exclusive)
 
-const BelongsTo = world.component();
-world.add(BelongsTo, Exclusive);
-
-world.add(item, pair(BelongsTo, player1));
-world.add(item, pair(BelongsTo, player2));
-// Now item belongs to player2 only (replaced)
+world:add(item, pair(BelongsTo, player1))
+world:add(item, pair(BelongsTo, player2))
+-- Now item belongs to player2 only (replaced)
 ```
 
 ## Querying Relationships
 
 ### Specific Target
 
-```ts
-// All entities that like alice
-for (const [entityId] of world.query(pair(Likes, alice))) {
-	print(entityId);
-}
+```luau
+-- All entities that like alice
+for entityId in world:query(pair(Likes, alice)) do
+	print(entityId)
+end
 ```
 
 ### Wildcard Target
 
-```ts
-// All entities that like someone
-for (const [entityId] of world.query(pair(Likes, Wildcard))) {
-	const target = world.target(entityId, Likes);
-	print(`${entityId} likes ${target}`);
-}
+```luau
+-- All entities that like someone
+for entityId in world:query(pair(Likes, jecs.Wildcard)) do
+	local target = world:target(entityId, Likes)
+	print(`{entityId} likes {target}`)
+end
 ```
 
 ### Wildcard Relationship
 
-```ts
-// All relationships with alice as target
-for (const [entityId] of world.query(pair(Wildcard, alice))) {
-	print(`${entityId} has relationship with alice`);
-}
+```luau
+-- All relationships with alice as target
+for entityId in world:query(pair(jecs.Wildcard, alice)) do
+	print(`{entityId} has relationship with alice`)
+end
 ```
 
 ### Multiple Targets
 
-Entity can have multiple targets for same relationship.
+Entity can have multiple targets for same relationship. `world:target` indices
+are 0-based.
 
-```ts
-world.add(bob, pair(Likes, alice));
-world.add(bob, pair(Likes, charlie));
+```luau
+world:add(bob, pair(Likes, alice))
+world:add(bob, pair(Likes, charlie))
 
-// Iterate all targets
-let nth = 0;
-let target = world.target(bob, Likes, nth);
-while (target !== undefined) {
-	print(`bob likes ${target}`);
-	nth++;
-	target = world.target(bob, Likes, nth);
-}
+-- Iterate all targets
+local nth = 0
+local target = world:target(bob, Likes, nth)
+while target do
+	print(`bob likes {target}`)
+	nth += 1
+	target = world:target(bob, Likes, nth)
+end
+
+-- Or use the targets iterator
+for liked in world:targets(bob, Likes) do
+	print(`bob likes {liked}`)
+end
 ```
 
 ## Pair Introspection
 
-```ts
-import {
-	ECS_PAIR_FIRST,
-	ECS_PAIR_SECOND,
-	IS_PAIR,
-	pair,
-	pair_first,
-	pair_second,
-} from "@rbxts/jecs";
+```luau
+local likesPair = pair(Likes, alice)
 
-const likesPair = pair(Likes, alice);
+-- Check if ID is a pair
+jecs.IS_PAIR(likesPair) -- true
 
-// Check if ID is a pair
-IS_PAIR(likesPair); // true
+-- Extract parts (resolves alive entities)
+jecs.pair_first(world, likesPair) -- Likes
+jecs.pair_second(world, likesPair) -- alice
 
-// Extract parts
-pair_first(world, likesPair); // Likes
-pair_second(world, likesPair); // alice
-
-// Raw extraction (no world needed)
-ECS_PAIR_FIRST(likesPair); // raw ID
-ECS_PAIR_SECOND(likesPair); // raw ID
+-- Raw extraction (no world needed)
+jecs.ECS_PAIR_FIRST(likesPair) -- raw ID
+jecs.ECS_PAIR_SECOND(likesPair) -- raw ID
 ```
 
 ## Combining with Components
 
-```ts
-const Transform = world.component<CFrame>();
-const Health = world.component<number>();
+```luau
+local Transform = world:component() :: jecs.Id<CFrame>
+local Health = world:component() :: jecs.Id<number>
 
-// Query children with Transform and Health
-for (const [entity, transform, health] of world.query(Transform, Health, pair(ChildOf, parent))) {
-	print(`Child ${entity}: pos=${transform}, health=${health}`);
-}
+-- Query children with Transform and Health
+for entity, transform, health in world:query(Transform, Health, pair(ChildOf, parent)) do
+	print(`Child {entity}: pos={transform}, health={health}`)
+end
 ```
 
 ## Use Cases
@@ -200,18 +195,20 @@ for (const [entity, transform, health] of world.query(Transform, Health, pair(Ch
 
 Use pairs for multiple values of same type.
 
-```ts
-const Begin = world.entity();
-const End = world.entity();
+```luau
+local Begin = world:entity()
+local End = world:entity()
 
-world.set(entity, pair(Begin, Transform), new CFrame(0, 0, 0));
-world.set(entity, pair(End, Transform), new CFrame(10, 20, 30));
+world:set(entity, pair(Begin, Transform), CFrame.new(0, 0, 0))
+world:set(entity, pair(End, Transform), CFrame.new(10, 20, 30))
 ```
 
 <!--
 Source references:
 - how_to/013_pairs.luau
 - how_to/041_entity_relationships.luau
+- how_to/042_target.luau
+- how_to/043_wildcards.luau
 - examples/queries/wildcards.luau
 - examples/entities/hierarchy.luau
 -->

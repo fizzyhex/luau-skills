@@ -1,12 +1,6 @@
-[submodule "sources/pnpm"]
-	path = sources/pnpm
-	url = https://github.com/pnpm/pnpm.io
 [submodule "sources/jecs"]
 	path = sources/jecs
 	url = https://github.com/Ukendio/jecs
-[submodule "sources/roblox-ts"]
-	path = sources/roblox-ts
-	url = https://github.com/roblox-ts/roblox-ts.com
 [submodule "sources/jest"]
 	path = sources/jest
 	url = https://github.com/Roblox/jest-roblox
@@ -16,6 +10,6 @@
 [submodule "sources/flecs"]
 	path = sources/flecs
 	url = https://github.com/SanderMertens/flecs
-[submodule "sources/jest-extended"]
-	path = sources/jest-extended
-	url = https://github.com/christopher-buss/rbxts-jest-extended
+[submodule "sources/luau"]
+	path = sources/luau
+	url = https://github.com/luau-lang/site

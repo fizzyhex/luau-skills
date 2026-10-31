@@ -8,120 +8,118 @@ description: |
 
 ## In-File Filtering: `.only` and `.skip`
 
-Controls which tests run **within a single file**:
+Controls which tests run **within a single file**; other files still run:
 
-```ts
-describe.only("focused suite", () => {
-	it.only("should run this focused test", () => {
-		expect.assertions(1);
+```luau
+describe.only("focused suite", function()
+	it("runs", function()
+		expect(true).toBe(true)
+	end)
 
-		expect(true).toBeTruthy();
-	});
+	it.skip("is skipped", function()
+		expect(true).toBe(false)
+	end)
 
-	it.skip("should be skipped", () => {
-		expect.assertions(1);
+	describe.skip("skipped block", function()
+		it.only("still does not run", function()
+			expect(true).toBe(false)
+		end)
+	end)
+end)
 
-		expect(true).toBeFalsy();
-	});
-});
-
-describe("a now skipped suite", () => {
-	it("should be skipped because describe.only above", () => {
-		expect.assertions(1);
-
-		expect(true).toBeFalsy();
-	});
-});
+describe("a now skipped suite", function()
+	it("is skipped because of describe.only above", function()
+		expect(true).toBe(false)
+	end)
+end)
 ```
 
-`.skip` inside `.only` still skips. `.only` inside `.skip` still skips (skip
-wins).
+`.skip` inside `.only` still skips, and `.only` inside `.skip` still skips
+(skip wins).
 
 ## Filter by File Path
 
+Path filters match the test's filesystem path when Jest can resolve
+DataModel paths to files; otherwise they match the DataModel path, which can
+be unintuitive.
+
 ### `testMatch` (glob patterns)
 
-In `jest.config.ts`:
+In `jest.config`:
 
-```ts
-export = {
-	testMatch: ["**/*.spec"],
-};
+```luau
+return {
+	testMatch = { "**/*.spec" },
+}
 ```
 
-Default: `{ "**/__tests__/**/*", "**/?(*.)+(spec|test)?(.lua|.luau)" }`
+Default: `{ "**/__tests__/**/*", "**/?(*.)+(spec|test)?(.lua|.luau)" }`.
+Patterns apply in order, so put negations (`"!**/__fixtures__/**"`) **after**
+the positive patterns. Passing `testMatch` to `runCLI` overrides every config
+file.
 
 ### `testRegex` (regex patterns)
 
-Mutually exclusive with `testMatch`:
+Mutually exclusive with `testMatch`. Matched against the absolute path:
 
-```ts
-export = {
-	testRegex: ["foo%.lua$"],
-};
+```luau
+return {
+	testRegex = { "foo\\.lua$" },
+}
 ```
 
-### `testPathPattern` (CLI)
+### `testPathPattern` (runCLI)
 
-Filter by file path regex at runtime:
+Only run files whose path matches a regex:
 
-```ts
-runCLI(
-	root,
-	{
-		testPathPattern: "components",
-	},
-	[root],
-).awaitStatus();
+```luau
+Jest.runCLI(root, {
+	testPathPattern = "components",
+}, { root }):awaitStatus()
 ```
 
-### `testPathIgnorePatterns` (CLI/config)
+### `testPathIgnorePatterns` (runCLI/config)
 
-Exclude files matching patterns:
+Exclude files matching any of the patterns:
 
-```ts
-runCLI(
-	root,
-	{
-		testPathIgnorePatterns: ["legacy", "__fixtures__"],
-	},
-	[root],
-).awaitStatus();
+```luau
+Jest.runCLI(root, {
+	testPathIgnorePatterns = { "legacy", "__fixtures__" },
+}, { root }):awaitStatus()
 ```
 
 ## Filter by Test Name
 
 ### `testNamePattern`
 
-Match against the full test name (including parent `describe` blocks):
+Match against the full test name (all parent `describe` names plus the test
+name, space-separated):
 
-```ts
-runCLI(
-	root,
-	{
-		testNamePattern: "auth",
-	},
-	[root],
-).awaitStatus();
+```luau
+Jest.runCLI(root, {
+	testNamePattern = "auth",
+}, { root }):awaitStatus()
 ```
 
 Given:
 
-```ts
-describe("block A", () => {
-	it.todo("should test one");
+```luau
+describe("block A", function()
+	it.todo("test one")
+	it.todo("test two")
+end)
 
-	it.todo("should test two");
-});
+describe("block B", function()
+	it.todo("test three")
+end)
 
-describe("block B", () => {
-	it.todo("should test three");
-});
+it.todo("test one two three")
 ```
 
 - `"block A"` matches "test one" and "test two"
 - `"block A test one"` matches only "test one"
-- `"test one"` matches "test one" (and any other test containing "test one")
+- `"test one"` matches "test one" and "test one two three"
+- `"block B test one"` matches nothing
 
 <!--
 Source references:
