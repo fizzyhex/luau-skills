@@ -26,7 +26,15 @@ npx skills add fizzyhex/luau-skills --skill '*' --agent claude-code github-copil
 ```
 
 This installs project-level skills into `.claude/skills/` (Claude Code) and
-`.github/skills/` (GitHub Copilot in VS Code). Add `-g` to install globally.
+`.agents/skills/` (GitHub Copilot in VS Code). Add `-g` to install globally.
+For VS Code, enable skills and both folders in `.vscode/settings.json`:
+
+```json
+{
+	"chat.useAgentSkills": true,
+	"chat.agentSkillsLocations": { ".agents/skills": true, ".claude/skills": true }
+}
+```
 Other agents are listed by the [skills CLI](https://github.com/vercel-labs/skills).
 
 ### Hooks plugin
